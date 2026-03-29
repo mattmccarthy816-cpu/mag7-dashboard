@@ -1,35 +1,115 @@
-export const MAG7 = [
-  { sym: 'AAPL', name: 'Apple' },
-  { sym: 'MSFT', name: 'Microsoft' },
-  { sym: 'NVDA', name: 'Nvidia' },
-  { sym: 'AMZN', name: 'Amazon' },
-  { sym: 'GOOGL', name: 'Alphabet' },
-  { sym: 'META', name: 'Meta' },
-  { sym: 'TSLA', name: 'Tesla' },
+// All 11 S&P 500 sectors with ETF tickers, top 7 holdings, weights, and colors
+export const SECTORS = [
+  {
+    id: 'tech',
+    name: 'Information Technology',
+    short: 'Tech',
+    etf: 'XLK',
+    color: '#4a8fd4',
+    weight: 31.4,
+    top7: ['AAPL', 'MSFT', 'NVDA', 'AVGO', 'ORCL', 'CRM', 'AMD'],
+  },
+  {
+    id: 'financials',
+    name: 'Financials',
+    short: 'Financials',
+    etf: 'XLF',
+    color: '#1fb87a',
+    weight: 13.2,
+    top7: ['BRK-B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS'],
+  },
+  {
+    id: 'health',
+    name: 'Health Care',
+    short: 'Health Care',
+    etf: 'XLV',
+    color: '#e8a835',
+    weight: 11.8,
+    top7: ['LLY', 'UNH', 'JNJ', 'ABBV', 'MRK', 'TMO', 'ABT'],
+  },
+  {
+    id: 'consumer_disc',
+    name: 'Consumer Discretionary',
+    short: 'Cons. Disc.',
+    etf: 'XLY',
+    color: '#9b7de0',
+    weight: 10.5,
+    top7: ['AMZN', 'TSLA', 'HD', 'MCD', 'NKE', 'LOW', 'SBUX'],
+  },
+  {
+    id: 'industrials',
+    name: 'Industrials',
+    short: 'Industrials',
+    etf: 'XLI',
+    color: '#d4507a',
+    weight: 8.7,
+    top7: ['GE', 'CAT', 'RTX', 'HON', 'UNP', 'BA', 'LMT'],
+  },
+  {
+    id: 'comms',
+    name: 'Communication Services',
+    short: 'Comm. Svcs.',
+    etf: 'XLC',
+    color: '#4ab8b8',
+    weight: 8.4,
+    top7: ['META', 'GOOGL', 'GOOG', 'NFLX', 'DIS', 'TMUS', 'VZ'],
+  },
+  {
+    id: 'staples',
+    name: 'Consumer Staples',
+    short: 'Cons. Staples',
+    etf: 'XLP',
+    color: '#a0c878',
+    weight: 5.9,
+    top7: ['WMT', 'PG', 'COST', 'KO', 'PEP', 'PM', 'MDLZ'],
+  },
+  {
+    id: 'energy',
+    name: 'Energy',
+    short: 'Energy',
+    etf: 'XLE',
+    color: '#e07840',
+    weight: 3.8,
+    top7: ['XOM', 'CVX', 'COP', 'EOG', 'SLB', 'MPC', 'PSX'],
+  },
+  {
+    id: 'realestate',
+    name: 'Real Estate',
+    short: 'Real Estate',
+    etf: 'XLRE',
+    color: '#88b04b',
+    weight: 2.4,
+    top7: ['PLD', 'AMT', 'EQIX', 'WELL', 'SPG', 'DLR', 'O'],
+  },
+  {
+    id: 'materials',
+    name: 'Materials',
+    short: 'Materials',
+    etf: 'XLB',
+    color: '#c97f3e',
+    weight: 2.2,
+    top7: ['LIN', 'APD', 'SHW', 'FCX', 'ECL', 'NEM', 'NUE'],
+  },
+  {
+    id: 'utilities',
+    name: 'Utilities',
+    short: 'Utilities',
+    etf: 'XLU',
+    color: '#6bb5c9',
+    weight: 2.0,
+    top7: ['NEE', 'SO', 'DUK', 'AEP', 'SRE', 'D', 'EXC'],
+  },
 ]
 
+// S&P 500 sector weights for breakdown panel — derived from SECTORS above
+export const SP_SECTORS = SECTORS.map(s => ({
+  name: s.short,
+  pct: s.weight,
+  color: s.color,
+}))
+
+// Ticker colors for top-7 cards within a sector
 export const TICKER_COLORS = [
-  '#4a8fd4', // AAPL – blue
-  '#1fb87a', // MSFT – green
-  '#e8a835', // NVDA – amber
-  '#e05050', // AMZN – red
-  '#9b7de0', // GOOGL – purple
-  '#d4507a', // META – pink
-  '#4ab8b8', // TSLA – teal
-]
-
-// S&P 500 sector weights — update quarterly
-// Source: SPDR as of Q1 2025
-export const SP_SECTORS = [
-  { name: 'Information Tech', pct: 31.4, color: '#4a8fd4' },
-  { name: 'Financials',        pct: 13.2, color: '#1fb87a' },
-  { name: 'Health Care',       pct: 11.8, color: '#e8a835' },
-  { name: 'Consumer Disc.',    pct: 10.5, color: '#9b7de0' },
-  { name: 'Industrials',       pct:  8.7, color: '#d4507a' },
-  { name: 'Communication',     pct:  8.4, color: '#4ab8b8' },
-  { name: 'Consumer Staples',  pct:  5.9, color: '#a0a0a0' },
-  { name: 'Energy',            pct:  3.8, color: '#e05050' },
-  { name: 'Real Estate',       pct:  2.4, color: '#88b04b' },
-  { name: 'Materials',         pct:  2.2, color: '#c97f3e' },
-  { name: 'Utilities',         pct:  2.0, color: '#6bb5c9' },
+  '#4a8fd4', '#1fb87a', '#e8a835', '#e05050',
+  '#9b7de0', '#d4507a', '#4ab8b8',
 ]

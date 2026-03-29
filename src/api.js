@@ -1,16 +1,4 @@
-// All fetching goes through our own Vercel serverless functions in /api/
-// This avoids CORS entirely — the server fetches Yahoo/CNN directly.
-
-export async function fetchYahoo(sym, range = '1y', interval = '1d') {
-  try {
-    const res = await fetch(`/api/quote?symbols=${sym}&range=${range}&interval=${interval}`)
-    if (!res.ok) return null
-    const data = await res.json()
-    return data?.[0]?.data ?? null
-  } catch {
-    return null
-  }
-}
+// All data fetching via our own Vercel serverless functions in /api/
 
 export async function fetchYahooMany(syms, range = '1y', interval = '1d') {
   try {

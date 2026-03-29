@@ -1,5 +1,5 @@
-// Vercel serverless function — runs on the server, bypasses CORS entirely
-// Called by the frontend as /api/quote?symbols=AAPL,MSFT&range=1y
+// Vercel serverless function — fetches Yahoo Finance server-side (no CORS)
+// GET /api/quote?symbols=AAPL,MSFT,XLK,SPY&range=1y&interval=1d
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -20,19 +20,19 @@ export default async function handler(req, res) {
 
   const results = await Promise.all(syms.map(async (sym) => {
     try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=${interval}&range=${range}&includePrePost=false`
-      const r = await fetch(url, { headers })
-      if (!r.ok) {
-        // try query2 as fallback
-        const r2 = await fetch(url.replace('query1', 'query2'), { headers })
-        if (!r2.ok) return { sym, error: r2.status }
-        const d2 = await r2.json()
-        return { sym, data: d2?.chart?.result?.[0] ?? null }
+      const tryFetch = async (host) => {
+        const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${sym}?interval=${interval}&range=${range}&includePrePost=false`
+        const r = await fetch(url, { headers })
+        if (!r.ok) throw new Error(`${r.status}`)
+        return r
       }
+      let r
+      try { r = await tryFetch('query1') }
+      catch { r = await tryFetch('query2') }
       const d = await r.json()
       return { sym, data: d?.chart?.result?.[0] ?? null }
     } catch (e) {
-      return { sym, error: e.message }
+      return { sym, data: null, error: e.message }
     }
   }))
 
