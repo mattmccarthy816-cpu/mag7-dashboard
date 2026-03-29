@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { fetchYahoo, fetchFearGreed } from './api'
+import { fetchYahooMany, fetchFearGreed } from './api'
 import { MAG7 } from './constants'
 import TickerCard from './components/TickerCard'
 import FearGreedPanel from './components/FearGreedPanel'
@@ -9,7 +9,7 @@ import TechRatioPanel from './components/TechRatioPanel'
 import McapPanel from './components/McapPanel'
 import PlaceholderPanel from './components/PlaceholderPanel'
 
-const REFRESH_MS = 60_000 // auto-refresh every 60s
+const REFRESH_MS = 60_000
 
 export default function App() {
   const [mag7Results, setMag7Results] = useState(Array(7).fill(null))
@@ -21,17 +21,19 @@ export default function App() {
   const [loading, setLoading] = useState(true)
 
   const fetchAll = useCallback(async () => {
-    const [mag7, sp, xlk, spy, fg] = await Promise.all([
-      Promise.all(MAG7.map(m => fetchYahoo(m.sym, '1y', '1d'))),
-      fetchYahoo('^GSPC', '1y', '1d'),
-      fetchYahoo('XLK', '1y', '1d'),
-      fetchYahoo('SPY', '1y', '1d'),
+    setLoading(true)
+
+    // Batch all equity fetches into two requests
+    const allSyms = [...MAG7.map(m => m.sym), '^GSPC', 'XLK', 'SPY']
+    const [allResults, fg] = await Promise.all([
+      fetchYahooMany(allSyms, '1y', '1d'),
       fetchFearGreed(),
     ])
-    setMag7Results(mag7)
-    setSpResult(sp)
-    setXlkResult(xlk)
-    setSpyResult(spy)
+
+    setMag7Results(allResults.slice(0, 7))
+    setSpResult(allResults[7])
+    setXlkResult(allResults[8])
+    setSpyResult(allResults[9])
     setFearGreed(fg)
     setLastUpdated(new Date())
     setLoading(false)
@@ -78,7 +80,7 @@ export default function App() {
               border: '0.5px solid var(--border-strong)',
               borderRadius: 'var(--radius-sm)',
               color: 'var(--text-secondary)',
-              cursor: 'pointer',
+              cursor: loading ? 'default' : 'pointer',
             }}
           >
             {loading ? 'Refreshing…' : '↻ Refresh'}
@@ -92,24 +94,11 @@ export default function App() {
         gridTemplateColumns: 'repeat(4, minmax(0,1fr))',
         gap: 8,
         marginBottom: 12,
-      }}
-        className="ticker-row"
-      >
+      }} className="ticker-row">
         {MAG7.map((m, i) => (
-          <TickerCard
-            key={m.sym}
-            result={mag7Results[i]}
-            sym={m.sym}
-            name={m.name}
-            color={null}
-          />
+          <TickerCard key={m.sym} result={mag7Results[i]} sym={m.sym} name={m.name} />
         ))}
-        <TickerCard
-          result={spResult}
-          sym="S&P 500"
-          name="^GSPC"
-          isSP500
-        />
+        <TickerCard result={spResult} sym="S&P 500" name="^GSPC" isSP500 />
       </div>
 
       {/* Mid row */}
@@ -118,9 +107,7 @@ export default function App() {
         gridTemplateColumns: '1fr 1fr 1fr',
         gap: 12,
         marginBottom: 12,
-      }}
-        className="mid-row"
-      >
+      }} className="mid-row">
         <FearGreedPanel data={fearGreed} />
         <SP500Panel result={spResult} />
         <SectorPanel />
@@ -131,14 +118,11 @@ export default function App() {
         display: 'grid',
         gridTemplateColumns: '2fr 1fr',
         gap: 12,
-      }}
-        className="bot-row"
-      >
+      }} className="bot-row">
         <TechRatioPanel xlkResult={xlkResult} spyResult={spyResult} />
         <McapPanel mag7Results={mag7Results} />
       </div>
 
-      {/* Responsive styles */}
       <style>{`
         @media (max-width: 900px) {
           .ticker-row { grid-template-columns: repeat(4, minmax(0,1fr)) !important; }
