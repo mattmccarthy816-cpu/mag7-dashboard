@@ -1,13 +1,37 @@
-const PROXY = 'https://corsproxy.io/?'
+// Yahoo Finance requires these headers to avoid 403s
+const YF_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+}
 
-function proxyUrl(url) {
-  return PROXY + encodeURIComponent(url)
+// Try proxies in order until one works
+const PROXIES = [
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  (url) => `https://proxy.cors.sh/${url}`,
+]
+
+async function fetchWithFallback(url, headers = {}) {
+  for (const makeProxy of PROXIES) {
+    try {
+      const res = await fetch(makeProxy(url), {
+        headers,
+        signal: AbortSignal.timeout(8000),
+      })
+      if (res.ok) return res
+    } catch {
+      // try next proxy
+    }
+  }
+  return null
 }
 
 export async function fetchYahoo(sym, range = '1d', interval = '1d') {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=${interval}&range=${range}`
-    const res = await fetch(proxyUrl(url))
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=${interval}&range=${range}&includePrePost=false`
+    const res = await fetchWithFallback(url, YF_HEADERS)
+    if (!res) return null
     const data = await res.json()
     return data?.chart?.result?.[0] ?? null
   } catch {
@@ -18,7 +42,8 @@ export async function fetchYahoo(sym, range = '1d', interval = '1d') {
 export async function fetchFearGreed() {
   try {
     const url = 'https://production.dataviz.cnn.io/index/fearandgreed/graphdata/'
-    const res = await fetch(proxyUrl(url))
+    const res = await fetchWithFallback(url)
+    if (!res) return null
     const data = await res.json()
     const val = Math.round(data?.fear_and_greed?.score ?? data?.score ?? 50)
     const rating = data?.fear_and_greed?.rating ?? scoreToLabel(val)
