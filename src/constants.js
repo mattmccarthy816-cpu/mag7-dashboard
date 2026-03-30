@@ -1,10 +1,10 @@
-// All 11 S&P 500 sectors with ETF tickers, top 7 holdings, weights, and colors
 export const SECTORS = [
   {
     id: 'tech',
     name: 'Information Technology',
     short: 'Tech',
     etf: 'XLK',
+    relatedEtfs: ['QQQ', 'IGV', 'SOXX'],
     color: '#4a8fd4',
     weight: 31.4,
     top7: ['AAPL', 'MSFT', 'NVDA', 'AVGO', 'ORCL', 'CRM', 'AMD'],
@@ -14,6 +14,7 @@ export const SECTORS = [
     name: 'Financials',
     short: 'Financials',
     etf: 'XLF',
+    relatedEtfs: ['KBE', 'KRE', 'IAI'],
     color: '#1fb87a',
     weight: 13.2,
     top7: ['BRK-B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS'],
@@ -23,6 +24,7 @@ export const SECTORS = [
     name: 'Health Care',
     short: 'Health Care',
     etf: 'XLV',
+    relatedEtfs: ['IBB', 'XBI', 'IHI'],
     color: '#e8a835',
     weight: 11.8,
     top7: ['LLY', 'UNH', 'JNJ', 'ABBV', 'MRK', 'TMO', 'ABT'],
@@ -32,6 +34,7 @@ export const SECTORS = [
     name: 'Consumer Discretionary',
     short: 'Cons. Disc.',
     etf: 'XLY',
+    relatedEtfs: ['RTH', 'XRT', 'IBUY'],
     color: '#9b7de0',
     weight: 10.5,
     top7: ['AMZN', 'TSLA', 'HD', 'MCD', 'NKE', 'LOW', 'SBUX'],
@@ -41,6 +44,7 @@ export const SECTORS = [
     name: 'Industrials',
     short: 'Industrials',
     etf: 'XLI',
+    relatedEtfs: ['ITA', 'JETS', 'PAVE'],
     color: '#d4507a',
     weight: 8.7,
     top7: ['GE', 'CAT', 'RTX', 'HON', 'UNP', 'BA', 'LMT'],
@@ -50,15 +54,17 @@ export const SECTORS = [
     name: 'Communication Services',
     short: 'Comm. Svcs.',
     etf: 'XLC',
+    relatedEtfs: ['IYZ', 'FCOM', 'SOCL'],
     color: '#4ab8b8',
     weight: 8.4,
-    top7: ['META', 'GOOGL', 'GOOG', 'NFLX', 'DIS', 'TMUS', 'VZ'],
+    top7: ['META', 'GOOGL', 'NFLX', 'DIS', 'TMUS', 'VZ', 'CHTR'],
   },
   {
     id: 'staples',
     name: 'Consumer Staples',
     short: 'Cons. Staples',
     etf: 'XLP',
+    relatedEtfs: ['VDC', 'FSTA', 'KXI'],
     color: '#a0c878',
     weight: 5.9,
     top7: ['WMT', 'PG', 'COST', 'KO', 'PEP', 'PM', 'MDLZ'],
@@ -68,6 +74,7 @@ export const SECTORS = [
     name: 'Energy',
     short: 'Energy',
     etf: 'XLE',
+    relatedEtfs: ['OIH', 'XOP', 'AMLP'],
     color: '#e07840',
     weight: 3.8,
     top7: ['XOM', 'CVX', 'COP', 'EOG', 'SLB', 'MPC', 'PSX'],
@@ -77,6 +84,7 @@ export const SECTORS = [
     name: 'Real Estate',
     short: 'Real Estate',
     etf: 'XLRE',
+    relatedEtfs: ['VNQ', 'IYR', 'REZ'],
     color: '#88b04b',
     weight: 2.4,
     top7: ['PLD', 'AMT', 'EQIX', 'WELL', 'SPG', 'DLR', 'O'],
@@ -86,6 +94,7 @@ export const SECTORS = [
     name: 'Materials',
     short: 'Materials',
     etf: 'XLB',
+    relatedEtfs: ['GDX', 'LIT', 'PICK'],
     color: '#c97f3e',
     weight: 2.2,
     top7: ['LIN', 'APD', 'SHW', 'FCX', 'ECL', 'NEM', 'NUE'],
@@ -95,20 +104,19 @@ export const SECTORS = [
     name: 'Utilities',
     short: 'Utilities',
     etf: 'XLU',
+    relatedEtfs: ['VPU', 'IDU', 'FUTY'],
     color: '#6bb5c9',
     weight: 2.0,
     top7: ['NEE', 'SO', 'DUK', 'AEP', 'SRE', 'D', 'EXC'],
   },
 ]
 
-// S&P 500 sector weights for breakdown panel — derived from SECTORS above
 export const SP_SECTORS = SECTORS.map(s => ({
   name: s.short,
   pct: s.weight,
   color: s.color,
 }))
 
-// Ticker colors for top-7 cards within a sector
 export const TICKER_COLORS = [
   '#4a8fd4', '#1fb87a', '#e8a835', '#e05050',
   '#9b7de0', '#d4507a', '#4ab8b8',

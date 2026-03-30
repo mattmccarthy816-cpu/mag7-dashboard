@@ -4,62 +4,59 @@ import { SECTORS } from './constants'
 import SectorTabs from './components/SectorTabs'
 import TickerCard from './components/TickerCard'
 import FearGreedPanel from './components/FearGreedPanel'
-import SP500Panel from './components/SP500Panel'
+import SectorMomentumPanel from './components/SectorMomentumPanel'
 import SectorPanel from './components/SectorPanel'
 import SectorVsMarketPanel from './components/SectorVsMarketPanel'
 import Top7McapPanel from './components/Top7McapPanel'
+import SectorAnalysisPanel from './components/SectorAnalysisPanel'
 
 const REFRESH_MS = 60_000
 
 export default function App() {
   const [activeSector, setActiveSector] = useState(SECTORS[0])
-
-  // Static data (S&P 500 + SPY — loaded once)
   const [spResult, setSpResult] = useState(null)
   const [spyResult, setSpyResult] = useState(null)
   const [fearGreed, setFearGreed] = useState(null)
-
-  // Dynamic data (changes per sector tab)
   const [top7Results, setTop7Results] = useState(Array(7).fill(null))
   const [sectorEtfResult, setSectorEtfResult] = useState(null)
-
+  const [relatedResults, setRelatedResults] = useState([])
   const [lastUpdated, setLastUpdated] = useState(null)
   const [loading, setLoading] = useState(true)
   const [sectorLoading, setSectorLoading] = useState(false)
-
-  // Cache sector data so switching tabs doesn't re-fetch
   const sectorCache = useRef({})
 
   const fetchBase = useCallback(async () => {
-    const [baseResults, fg] = await Promise.all([
+    const [results, fg] = await Promise.all([
       fetchYahooMany(['^GSPC', 'SPY'], '1y', '1d'),
       fetchFearGreed(),
     ])
-    setSpResult(baseResults[0])
-    setSpyResult(baseResults[1])
+    setSpResult(results[0])
+    setSpyResult(results[1])
     setFearGreed(fg)
   }, [])
 
   const fetchSector = useCallback(async (sector, force = false) => {
-    const cacheKey = sector.id
-    if (!force && sectorCache.current[cacheKey]) {
-      const cached = sectorCache.current[cacheKey]
-      setTop7Results(cached.top7)
-      setSectorEtfResult(cached.etf)
+    const key = sector.id
+    if (!force && sectorCache.current[key]) {
+      const c = sectorCache.current[key]
+      setTop7Results(c.top7)
+      setSectorEtfResult(c.etf)
+      setRelatedResults(c.related)
       return
     }
     setSectorLoading(true)
-    const syms = [...sector.top7, sector.etf]
+    const syms = [...sector.top7, sector.etf, ...sector.relatedEtfs]
     const results = await fetchYahooMany(syms, '1y', '1d')
     const top7 = results.slice(0, 7)
     const etf = results[7]
-    sectorCache.current[cacheKey] = { top7, etf }
+    const related = results.slice(8, 8 + sector.relatedEtfs.length)
+    sectorCache.current[key] = { top7, etf, related }
     setTop7Results(top7)
     setSectorEtfResult(etf)
+    setRelatedResults(related)
     setSectorLoading(false)
   }, [])
 
-  // Initial load
   useEffect(() => {
     const init = async () => {
       setLoading(true)
@@ -69,7 +66,7 @@ export default function App() {
     }
     init()
     const id = setInterval(() => {
-      sectorCache.current = {} // clear cache on refresh
+      sectorCache.current = {}
       fetchBase()
       fetchSector(activeSector, true)
       setLastUpdated(new Date())
@@ -77,7 +74,6 @@ export default function App() {
     return () => clearInterval(id)
   }, [])
 
-  // Switch sector tab
   const handleSectorChange = useCallback((sector) => {
     setActiveSector(sector)
     fetchSector(sector)
@@ -91,24 +87,17 @@ export default function App() {
     setLoading(false)
   }
 
+  const fade = { opacity: sectorLoading ? 0.45 : 1, transition: 'opacity 0.2s' }
+
   return (
     <div>
       {/* Header */}
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 16,
-        flexWrap: 'wrap',
-        gap: 8,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 16, flexWrap: 'wrap', gap: 8,
       }}>
         <div>
-          <h1 style={{
-            fontSize: 20,
-            fontWeight: 600,
-            color: 'var(--text-primary)',
-            letterSpacing: '-0.02em',
-          }}>
+          <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
             S&P 500 Sector Dashboard
           </h1>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
@@ -121,19 +110,14 @@ export default function App() {
               Updated {lastUpdated.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            style={{
-              fontSize: 11,
-              padding: '5px 12px',
-              background: 'var(--bg-secondary)',
-              border: '0.5px solid var(--border-strong)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--text-secondary)',
-              cursor: loading ? 'default' : 'pointer',
-            }}
-          >
+          <button onClick={handleRefresh} disabled={loading} style={{
+            fontSize: 11, padding: '5px 12px',
+            background: 'var(--bg-secondary)',
+            border: '0.5px solid var(--border-strong)',
+            borderRadius: 'var(--radius-sm)',
+            color: 'var(--text-secondary)',
+            cursor: loading ? 'default' : 'pointer',
+          }}>
             {loading ? 'Refreshing…' : '↻ Refresh'}
           </button>
         </div>
@@ -142,53 +126,43 @@ export default function App() {
       {/* Sector tabs */}
       <SectorTabs activeSector={activeSector} onChange={handleSectorChange} />
 
-      {/* Ticker row — top 7 for active sector */}
+      {/* Row 1: Top 7 ticker cards + S&P 500 */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(4, minmax(0,1fr))',
-        gap: 8,
-        marginBottom: 12,
-        opacity: sectorLoading ? 0.5 : 1,
-        transition: 'opacity 0.2s',
+        gap: 8, marginBottom: 12, ...fade,
       }} className="ticker-row">
         {activeSector.top7.map((sym, i) => (
-          <TickerCard
-            key={sym}
-            result={top7Results[i]}
-            sym={sym}
-            color={activeSector.color}
-          />
+          <TickerCard key={sym} result={top7Results[i]} sym={sym} />
         ))}
-        <TickerCard
-          result={spResult}
-          sym="S&P 500"
-          name="^GSPC"
-          isSP500
-        />
+        <TickerCard result={spResult} sym="S&P 500" name="^GSPC" isSP500 />
       </div>
 
-      {/* Mid row: Fear & Greed | S&P 500 | Sector breakdown */}
+      {/* Row 2: Sector Momentum | AI Analysis | Sector Breakdown */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: '1fr 1fr 1fr',
-        gap: 12,
-        marginBottom: 12,
+        gap: 12, marginBottom: 12, ...fade,
       }} className="mid-row">
-        <FearGreedPanel data={fearGreed} />
-        <SP500Panel result={spResult} />
+        <SectorMomentumPanel top7Results={top7Results} activeSector={activeSector} />
+        <SectorAnalysisPanel
+          activeSector={activeSector}
+          top7Results={top7Results}
+          sectorResult={sectorEtfResult}
+          spyResult={spyResult}
+        />
         <SectorPanel activeSector={activeSector} />
       </div>
 
-      {/* Bottom row: Sector vs Market | Top 7 Mcap share */}
+      {/* Row 3: Sector vs Market | Top 7 share of S&P 500 */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: '3fr 2fr',
-        gap: 12,
-        opacity: sectorLoading ? 0.5 : 1,
-        transition: 'opacity 0.2s',
+        gap: 12, ...fade,
       }} className="bot-row">
         <SectorVsMarketPanel
           sectorResult={sectorEtfResult}
+          relatedResults={relatedResults}
           spyResult={spyResult}
           activeSector={activeSector}
         />

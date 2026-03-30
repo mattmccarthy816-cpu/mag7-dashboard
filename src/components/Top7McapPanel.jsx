@@ -9,38 +9,38 @@ import { TICKER_COLORS } from '../constants'
 
 Chart.register(LineElement, PointElement, LineController, CategoryScale, LinearScale, Filler, Tooltip)
 
-// Approximate S&P 500 total market cap from SPY (SPY tracks ~$43T market)
-// SPY price * shares outstanding (~3.3B) gives rough index mcap
+// SPY shares outstanding — used to estimate S&P 500 total market cap from price
 const SPY_SHARES = 3_300_000_000
 
 export default function Top7McapPanel({ top7Results, spyResult, activeSector }) {
   const canvasRef = useRef(null)
   const chartRef = useRef(null)
-
   const syms = activeSector.top7
 
   useEffect(() => {
-    if (!canvasRef.current) return
+    if (!spyResult || !canvasRef.current) return
     if (chartRef.current) chartRef.current.destroy()
 
     const spyCloses = extractCloses(spyResult)
     const ts = extractTimestamps(spyResult)
-    if (!spyCloses.length) return
+    if (spyCloses.length < 2) return
 
-    // Build datasets: each stock's market cap share of S&P 500 over time
-    // We use closing price * shares outstanding approximated from current mcap/price ratio
-    const stockDatasets = top7Results.map((result, i) => {
+    const n = spyCloses.length
+
+    // Build one series per stock: % of estimated S&P 500 mcap at each point
+    const stockSeries = top7Results.map((result, i) => {
       if (!result) return null
       const closes = extractCloses(result)
+      if (!closes.length) return null
       const meta = result.meta
       const currentPrice = meta.regularMarketPrice
       const mcap = meta.marketCap
       if (!currentPrice || !mcap) return null
       const sharesOut = mcap / currentPrice
 
-      const n = Math.min(closes.length, spyCloses.length)
       const data = []
-      for (let j = 0; j < n; j++) {
+      const m = Math.min(closes.length, n)
+      for (let j = 0; j < m; j++) {
         if (closes[j] && spyCloses[j]) {
           const stockMcap = closes[j] * sharesOut
           const spyMcap = spyCloses[j] * SPY_SHARES
@@ -49,30 +49,49 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
           data.push(null)
         }
       }
-      return {
-        label: syms[i],
-        data,
-        borderColor: TICKER_COLORS[i],
-        backgroundColor: TICKER_COLORS[i] + '55',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        fill: i === 0 ? 'origin' : '-1',
-        tension: 0.3,
-      }
+      // pad to length n if stock has fewer data points
+      while (data.length < n) data.unshift(null)
+
+      return { sym: syms[i], data, color: TICKER_COLORS[i] }
     }).filter(Boolean)
 
-    if (!stockDatasets.length) return
+    if (!stockSeries.length) return
 
-    const n = Math.min(...stockDatasets.map(d => d.data.length), spyCloses.length)
-    const labels = []
-    for (let j = 0; j < n; j++) {
-      const d = new Date((ts[j] || 0) * 1000)
-      labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))
-    }
+    const labels = spyCloses.map((_, j) => {
+      if (!ts[j]) return ''
+      const d = new Date(ts[j] * 1000)
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    })
+
+    // Build stacked datasets — each dataset fills from the previous cumulative line
+    // We do this by computing cumulative sums and filling between them
+    const cumulativeData = stockSeries.map((_, si) => {
+      return labels.map((_, li) => {
+        let sum = 0
+        for (let k = 0; k <= si; k++) {
+          sum += stockSeries[k].data[li] ?? 0
+        }
+        return parseFloat(sum.toFixed(3))
+      })
+    })
+
+    const datasets = stockSeries.map((s, si) => ({
+      label: s.sym,
+      data: cumulativeData[si],
+      borderColor: s.color,
+      backgroundColor: s.color + '66',
+      borderWidth: 1,
+      pointRadius: 0,
+      fill: si === 0 ? 'origin' : { value: 0, target: si - 1 },
+      tension: 0.3,
+      spanGaps: true,
+      // fill between this line and the previous cumulative line
+      ...(si > 0 ? { fill: { above: s.color + '55', target: si - 1 } } : { fill: { above: s.color + '55', target: 'origin' } }),
+    }))
 
     chartRef.current = new Chart(canvasRef.current, {
       type: 'line',
-      data: { labels, datasets: stockDatasets },
+      data: { labels, datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -82,7 +101,15 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(2)}% of S&P 500`,
+              label: ctx => {
+                // Show individual (non-cumulative) share
+                const si = stockSeries.findIndex(s => s.sym === ctx.dataset.label)
+                if (si < 0) return null
+                const indiv = si === 0
+                  ? ctx.parsed.y
+                  : ctx.parsed.y - (cumulativeData[si - 1][ctx.dataIndex] ?? 0)
+                return ` ${ctx.dataset.label}: ${indiv.toFixed(2)}% of S&P 500`
+              },
             },
           },
         },
@@ -93,7 +120,6 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
           },
           y: {
             grid: { color: 'rgba(255,255,255,0.05)' },
-            stacked: true,
             ticks: {
               color: '#555',
               font: { size: 10 },
@@ -107,20 +133,12 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
     return () => { if (chartRef.current) chartRef.current.destroy() }
   }, [top7Results, spyResult, activeSector])
 
-  // Current mcap totals for legend
-  const validResults = top7Results.filter(Boolean)
-
   return (
     <Panel title={`Top 7 ${activeSector.short} — Share of S&P 500`} badge="stacked · 1 year">
-      <div style={{ position: 'relative', width: '100%', height: 200 }}>
+      <div style={{ position: 'relative', width: '100%', height: 210 }}>
         <canvas ref={canvasRef} />
       </div>
-      <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: '5px 12px',
-        marginTop: 10,
-      }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 12px', marginTop: 10 }}>
         {syms.map((sym, i) => {
           const r = top7Results[i]
           const mcap = r?.meta?.marketCap
