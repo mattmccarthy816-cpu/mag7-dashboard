@@ -148,9 +148,10 @@ export default function TickerSearch({ spyResult, onAddFavorite, favorites }) {
 
   const handleSearch = async (raw) => {
     const sym = raw.trim().toUpperCase()
-    if(!sym||results.find(r=>r.sym===sym)) return
+    if(!sym) return
     const color = CHART_COLORS[results.length % CHART_COLORS.length]
-    setResults(prev=>[...prev,{sym,result:null,color,loading:true,error:null}])
+    // Replace any existing result (one at a time)
+    setResults([{sym,result:null,color:CHART_COLORS[0],loading:true,error:null}])
     setInput('')
     try {
       const result = await fetchTicker(sym)
@@ -222,7 +223,8 @@ export default function TickerSearch({ spyResult, onAddFavorite, favorites }) {
             <div style={{overflowY:'auto',flex:1,padding:'0 20px'}}>
               {results.length===0 && (
                 <div style={{padding:'32px 0',textAlign:'center',color:'var(--text-muted)',fontSize:13,lineHeight:1.7}}>
-                  Search any US stock ticker to compare its 1-year<br/>performance against the S&P 500.
+                  Search any US stock ticker to compare its 1-year<br/>performance vs the S&P 500.
+                  <br/>Type a symbol and press Enter.
                 </div>
               )}
 
