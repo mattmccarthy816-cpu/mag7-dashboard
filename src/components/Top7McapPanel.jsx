@@ -1,16 +1,16 @@
 import React, { useEffect, useRef } from 'react'
 import {
-  Chart, LineElement, PointElement, LineController,
-  CategoryScale, LinearScale, Filler, Tooltip,
+  Chart, BarElement, BarController, LineElement, PointElement, LineController,
+  CategoryScale, LinearScale, Tooltip, Legend,
 } from 'chart.js'
 import Panel from './Panel'
 import { extractCloses, extractTimestamps, fmtMcap } from '../api'
 import { TICKER_COLORS } from '../constants'
 
-Chart.register(LineElement, PointElement, LineController, CategoryScale, LinearScale, Filler, Tooltip)
+Chart.register(BarElement, BarController, LineElement, PointElement, LineController, CategoryScale, LinearScale, Tooltip, Legend)
 
-// SPY shares outstanding — used to estimate S&P 500 total market cap from price
 const SPY_SHARES = 3_300_000_000
+const SAMPLE_EVERY = 5 // take every Nth data point to keep bar chart readable
 
 export default function Top7McapPanel({ top7Results, spyResult, activeSector }) {
   const canvasRef = useRef(null)
@@ -25,10 +25,21 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
     const ts = extractTimestamps(spyResult)
     if (spyCloses.length < 2) return
 
-    const n = spyCloses.length
+    // Sample indices evenly across the year
+    const indices = []
+    for (let i = 0; i < spyCloses.length; i += SAMPLE_EVERY) indices.push(i)
+    if (indices[indices.length - 1] !== spyCloses.length - 1) {
+      indices.push(spyCloses.length - 1)
+    }
 
-    // Build one series per stock: % of estimated S&P 500 mcap at each point
-    const stockSeries = top7Results.map((result, i) => {
+    const labels = indices.map(i => {
+      if (!ts[i]) return ''
+      const d = new Date(ts[i] * 1000)
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    })
+
+    // Build per-stock datasets — each stock's % of S&P 500 mcap at sampled points
+    const datasets = top7Results.map((result, idx) => {
       if (!result) return null
       const closes = extractCloses(result)
       if (!closes.length) return null
@@ -38,59 +49,27 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
       if (!currentPrice || !mcap) return null
       const sharesOut = mcap / currentPrice
 
-      const data = []
-      const m = Math.min(closes.length, n)
-      for (let j = 0; j < m; j++) {
-        if (closes[j] && spyCloses[j]) {
-          const stockMcap = closes[j] * sharesOut
-          const spyMcap = spyCloses[j] * SPY_SHARES
-          data.push(parseFloat((stockMcap / spyMcap * 100).toFixed(3)))
-        } else {
-          data.push(null)
-        }
-      }
-      // pad to length n if stock has fewer data points
-      while (data.length < n) data.unshift(null)
+      const data = indices.map(i => {
+        const stockClose = closes[i] ?? closes[closes.length - 1]
+        const spyClose = spyCloses[i]
+        if (!stockClose || !spyClose) return 0
+        return parseFloat(((stockClose * sharesOut) / (spyClose * SPY_SHARES) * 100).toFixed(3))
+      })
 
-      return { sym: syms[i], data, color: TICKER_COLORS[i] }
+      return {
+        label: syms[idx],
+        data,
+        backgroundColor: TICKER_COLORS[idx] + 'cc',
+        borderColor: TICKER_COLORS[idx],
+        borderWidth: 0,
+        stack: 'mcap',
+      }
     }).filter(Boolean)
 
-    if (!stockSeries.length) return
-
-    const labels = spyCloses.map((_, j) => {
-      if (!ts[j]) return ''
-      const d = new Date(ts[j] * 1000)
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    })
-
-    // Build stacked datasets — each dataset fills from the previous cumulative line
-    // We do this by computing cumulative sums and filling between them
-    const cumulativeData = stockSeries.map((_, si) => {
-      return labels.map((_, li) => {
-        let sum = 0
-        for (let k = 0; k <= si; k++) {
-          sum += stockSeries[k].data[li] ?? 0
-        }
-        return parseFloat(sum.toFixed(3))
-      })
-    })
-
-    const datasets = stockSeries.map((s, si) => ({
-      label: s.sym,
-      data: cumulativeData[si],
-      borderColor: s.color,
-      backgroundColor: s.color + '66',
-      borderWidth: 1,
-      pointRadius: 0,
-      fill: si === 0 ? 'origin' : { value: 0, target: si - 1 },
-      tension: 0.3,
-      spanGaps: true,
-      // fill between this line and the previous cumulative line
-      ...(si > 0 ? { fill: { above: s.color + '55', target: si - 1 } } : { fill: { above: s.color + '55', target: 'origin' } }),
-    }))
+    if (!datasets.length) return
 
     chartRef.current = new Chart(canvasRef.current, {
-      type: 'line',
+      type: 'bar',
       data: { labels, datasets },
       options: {
         responsive: true,
@@ -101,24 +80,22 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: ctx => {
-                // Show individual (non-cumulative) share
-                const si = stockSeries.findIndex(s => s.sym === ctx.dataset.label)
-                if (si < 0) return null
-                const indiv = si === 0
-                  ? ctx.parsed.y
-                  : ctx.parsed.y - (cumulativeData[si - 1][ctx.dataIndex] ?? 0)
-                return ` ${ctx.dataset.label}: ${indiv.toFixed(2)}% of S&P 500`
+              label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}% of S&P 500`,
+              footer: items => {
+                const total = items.reduce((s, i) => s + i.parsed.y, 0)
+                return `Total: ${total.toFixed(2)}%`
               },
             },
           },
         },
         scales: {
           x: {
+            stacked: true,
             grid: { display: false },
             ticks: { color: '#555', font: { size: 10 }, maxTicksLimit: 8, maxRotation: 0 },
           },
           y: {
+            stacked: true,
             grid: { color: 'rgba(255,255,255,0.05)' },
             ticks: {
               color: '#555',

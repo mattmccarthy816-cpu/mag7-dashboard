@@ -8,22 +8,24 @@ import { extractCloses, extractTimestamps, pctChange } from '../api'
 
 Chart.register(LineElement, PointElement, LineController, CategoryScale, LinearScale, Filler, Tooltip)
 
-const LINE_COLORS = ['#4a8fd4', '#1fb87a', '#e8a835', '#9b7de0']
-const SPY_COLOR = '#666680'
-
 export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyResult, activeSector }) {
   const canvasRef = useRef(null)
   const chartRef = useRef(null)
 
+  // Primary ETF: full opacity, 2.5px
+  // Related ETFs: 40% opacity, 1.5px
+  // SPY: dashed, muted gray
   const allEtfs = [
-    { label: activeSector.etf, result: sectorResult, color: activeSector.color, width: 2.5 },
+    { label: activeSector.etf, result: sectorResult, color: activeSector.color, width: 2.5, opacity: 1, dash: [] },
     ...activeSector.relatedEtfs.map((etf, i) => ({
       label: etf,
       result: relatedResults?.[i] ?? null,
-      color: LINE_COLORS[i + 1] ?? LINE_COLORS[i],
+      color: activeSector.color,
       width: 1.5,
+      opacity: 0.35,
+      dash: [],
     })),
-    { label: 'SPY', result: spyResult, color: SPY_COLOR, width: 1.5, dash: [5, 4] },
+    { label: 'SPY', result: spyResult, color: '#888892', width: 1.5, opacity: 0.7, dash: [5, 4] },
   ]
 
   useEffect(() => {
@@ -40,7 +42,7 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     })
 
-    const datasets = allEtfs.map(({ label, result, color, width, dash }) => {
+    const datasets = allEtfs.map(({ label, result, color, width, opacity, dash }) => {
       const closes = result ? extractCloses(result) : []
       const base = closes[0]
       const data = Array(n).fill(null)
@@ -50,12 +52,18 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
           data[i] = parseFloat(((closes[i] - base) / base * 100).toFixed(2))
         }
       }
+      // Convert hex color + opacity to rgba
+      const r = parseInt(color.slice(1, 3), 16)
+      const g = parseInt(color.slice(3, 5), 16)
+      const b = parseInt(color.slice(5, 7), 16)
+      const rgba = `rgba(${r},${g},${b},${opacity})`
+
       return {
         label,
         data,
-        borderColor: color,
+        borderColor: rgba,
         borderWidth: width,
-        borderDash: dash ?? [],
+        borderDash: dash,
         pointRadius: 0,
         fill: false,
         tension: 0.3,
@@ -103,7 +111,6 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
     return () => { if (chartRef.current) chartRef.current.destroy() }
   }, [sectorResult, relatedResults, spyResult, activeSector])
 
-  // 1yr badge for primary ETF
   const sectorCloses = extractCloses(sectorResult)
   const spyCloses = extractCloses(spyResult)
   const n = Math.min(sectorCloses.length, spyCloses.length)
@@ -118,20 +125,25 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
   return (
     <Panel title={`${activeSector.short} vs. S&P 500`} badge={badge || '1 year · % return'}>
       {/* Legend */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginBottom: 10 }}>
-        {allEtfs.map(({ label, color, dash }) => (
-          <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-secondary)' }}>
-            <svg width="18" height="8" style={{ flexShrink: 0 }}>
-              <line
-                x1="0" y1="4" x2="18" y2="4"
-                stroke={color}
-                strokeWidth={label === activeSector.etf ? 2.5 : 1.5}
-                strokeDasharray={dash ? '5,4' : undefined}
-              />
-            </svg>
-            {label}
-          </span>
-        ))}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 14px', marginBottom: 10 }}>
+        {allEtfs.map(({ label, color, opacity, dash }) => {
+          const r = parseInt(color.slice(1, 3), 16)
+          const g = parseInt(color.slice(3, 5), 16)
+          const b = parseInt(color.slice(5, 7), 16)
+          const rgba = `rgba(${r},${g},${b},${opacity})`
+          return (
+            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-secondary)', opacity: opacity < 0.5 ? 0.65 : 1 }}>
+              <svg width="18" height="8" style={{ flexShrink: 0 }}>
+                <line x1="0" y1="4" x2="18" y2="4"
+                  stroke={rgba}
+                  strokeWidth={label === activeSector.etf ? 2.5 : 1.5}
+                  strokeDasharray={dash?.length ? '5,4' : undefined}
+                />
+              </svg>
+              {label}
+            </span>
+          )
+        })}
       </div>
       <div style={{ position: 'relative', width: '100%', height: 210 }}>
         <canvas ref={canvasRef} />
