@@ -1,31 +1,38 @@
 import React, { useEffect, useRef } from 'react'
 import {
   Chart, LineElement, PointElement, LineController,
-  CategoryScale, LinearScale, Filler, Tooltip,
+  CategoryScale, LinearScale, Tooltip,
 } from 'chart.js'
 import Panel from './Panel'
 import { extractCloses, extractTimestamps, pctChange } from '../api'
 
-Chart.register(LineElement, PointElement, LineController, CategoryScale, LinearScale, Filler, Tooltip)
+Chart.register(LineElement, PointElement, LineController, CategoryScale, LinearScale, Tooltip)
+
+function hexToRgba(hex, opacity) {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r},${g},${b},${opacity})`
+}
 
 export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyResult, activeSector }) {
   const canvasRef = useRef(null)
   const chartRef = useRef(null)
 
-  // Primary ETF: full opacity, 2.5px
-  // Related ETFs: 40% opacity, 1.5px
-  // SPY: dashed, muted gray
-  const allEtfs = [
-    { label: activeSector.etf, result: sectorResult, color: activeSector.color, width: 2.5, opacity: 1, dash: [] },
+  // Primary ETF: full color, bold
+  // Related ETFs: sector color at 30% opacity, thin
+  // SPY: white/light, bold dashed — the market baseline
+  const etfConfigs = [
+    { label: activeSector.etf, result: sectorResult,       color: activeSector.color, width: 2.5, opacity: 1,   dash: [] },
     ...activeSector.relatedEtfs.map((etf, i) => ({
       label: etf,
       result: relatedResults?.[i] ?? null,
       color: activeSector.color,
-      width: 1.5,
-      opacity: 0.35,
+      width: 1,
+      opacity: 0.3,
       dash: [],
     })),
-    { label: 'SPY', result: spyResult, color: '#888892', width: 1.5, opacity: 0.7, dash: [5, 4] },
+    { label: 'SPY',             result: spyResult,           color: '#c8c8d8',           width: 2,   opacity: 1,   dash: [6, 3] },
   ]
 
   useEffect(() => {
@@ -42,26 +49,18 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     })
 
-    const datasets = allEtfs.map(({ label, result, color, width, opacity, dash }) => {
+    const datasets = etfConfigs.map(({ label, result, color, width, opacity, dash }) => {
       const closes = result ? extractCloses(result) : []
       const base = closes[0]
       const data = Array(n).fill(null)
       const m = Math.min(closes.length, n)
       for (let i = 0; i < m; i++) {
-        if (closes[i] && base) {
-          data[i] = parseFloat(((closes[i] - base) / base * 100).toFixed(2))
-        }
+        if (closes[i] && base) data[i] = parseFloat(((closes[i] - base) / base * 100).toFixed(2))
       }
-      // Convert hex color + opacity to rgba
-      const r = parseInt(color.slice(1, 3), 16)
-      const g = parseInt(color.slice(3, 5), 16)
-      const b = parseInt(color.slice(5, 7), 16)
-      const rgba = `rgba(${r},${g},${b},${opacity})`
-
       return {
         label,
         data,
-        borderColor: rgba,
+        borderColor: hexToRgba(color, opacity),
         borderWidth: width,
         borderDash: dash,
         pointRadius: 0,
@@ -99,8 +98,7 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
           y: {
             grid: { color: 'rgba(255,255,255,0.05)' },
             ticks: {
-              color: '#555',
-              font: { size: 10 },
+              color: '#555', font: { size: 10 },
               callback: v => (v >= 0 ? '+' : '') + v.toFixed(0) + '%',
             },
           },
@@ -116,34 +114,29 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
   const n = Math.min(sectorCloses.length, spyCloses.length)
   let badge = null
   if (n > 1) {
-    const sYr = pctChange(sectorCloses[n - 1], sectorCloses[0])
-    const mYr = pctChange(spyCloses[n - 1], spyCloses[0])
-    const diff = (sYr ?? 0) - (mYr ?? 0)
+    const diff = (pctChange(sectorCloses[n-1], sectorCloses[0]) ?? 0) - (pctChange(spyCloses[n-1], spyCloses[0]) ?? 0)
     badge = `${activeSector.etf} ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}% vs SPY · 1yr`
   }
 
   return (
     <Panel title={`${activeSector.short} vs. S&P 500`} badge={badge || '1 year · % return'}>
-      {/* Legend */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 14px', marginBottom: 10 }}>
-        {allEtfs.map(({ label, color, opacity, dash }) => {
-          const r = parseInt(color.slice(1, 3), 16)
-          const g = parseInt(color.slice(3, 5), 16)
-          const b = parseInt(color.slice(5, 7), 16)
-          const rgba = `rgba(${r},${g},${b},${opacity})`
-          return (
-            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-secondary)', opacity: opacity < 0.5 ? 0.65 : 1 }}>
-              <svg width="18" height="8" style={{ flexShrink: 0 }}>
-                <line x1="0" y1="4" x2="18" y2="4"
-                  stroke={rgba}
-                  strokeWidth={label === activeSector.etf ? 2.5 : 1.5}
-                  strokeDasharray={dash?.length ? '5,4' : undefined}
-                />
-              </svg>
-              {label}
-            </span>
-          )
-        })}
+        {etfConfigs.map(({ label, color, opacity, dash, width }) => (
+          <span key={label} style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            fontSize: 11,
+            color: opacity < 0.5 ? 'var(--text-muted)' : 'var(--text-secondary)',
+          }}>
+            <svg width="20" height="10" style={{ flexShrink: 0 }}>
+              <line x1="0" y1="5" x2="20" y2="5"
+                stroke={hexToRgba(color, opacity)}
+                strokeWidth={width}
+                strokeDasharray={dash?.length ? '6,3' : undefined}
+              />
+            </svg>
+            {label}
+          </span>
+        ))}
       </div>
       <div style={{ position: 'relative', width: '100%', height: 210 }}>
         <canvas ref={canvasRef} />

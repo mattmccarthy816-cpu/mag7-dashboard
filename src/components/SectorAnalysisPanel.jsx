@@ -52,7 +52,7 @@ export default function SectorAnalysisPanel({ activeSector, top7Results, sectorR
 
     const prompt = buildPrompt(activeSector, top7Results, sectorResult, spyResult)
 
-    fetch('https://api.anthropic.com/v1/messages', {
+    fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -74,8 +74,7 @@ export default function SectorAnalysisPanel({ activeSector, top7Results, sectorR
       })
       .catch(err => {
         if (requestIdRef.current !== myId) return
-        console.error('Analysis error:', err)
-        setError('Analysis unavailable — check browser console for details.')
+        setError('Analysis unavailable.')
         setLoading(false)
       })
   }, [activeSector.id, hasData])
@@ -86,18 +85,17 @@ export default function SectorAnalysisPanel({ activeSector, top7Results, sectorR
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {[100, 85, 70].map((w, i) => (
             <div key={i} style={{
-              height: 12, borderRadius: 4,
-              width: w + '%',
+              height: 12, borderRadius: 4, width: w + '%',
               background: 'var(--bg-secondary)',
               animation: 'pulse 1.5s ease-in-out infinite',
               animationDelay: i * 0.2 + 's',
             }} />
           ))}
-          <style>{`@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.8} }`}</style>
+          <style>{`@keyframes pulse{0%,100%{opacity:.3}50%{opacity:.7}}`}</style>
         </div>
       )}
       {error && !loading && (
-        <div style={{ fontSize: 12, color: '#e05050', lineHeight: 1.6 }}>{error}</div>
+        <div style={{ fontSize: 12, color: '#e05050' }}>{error}</div>
       )}
       {analysis && !loading && (
         <div style={{ fontSize: 12.5, lineHeight: 1.75, color: 'var(--text-primary)' }}>

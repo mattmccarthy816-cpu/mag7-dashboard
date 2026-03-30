@@ -1,16 +1,12 @@
 import React, { useEffect, useRef } from 'react'
-import {
-  Chart, BarElement, BarController, LineElement, PointElement, LineController,
-  CategoryScale, LinearScale, Tooltip, Legend,
-} from 'chart.js'
+import { Chart, BarElement, BarController, CategoryScale, LinearScale, Tooltip } from 'chart.js'
 import Panel from './Panel'
 import { extractCloses, extractTimestamps, fmtMcap } from '../api'
 import { TICKER_COLORS } from '../constants'
 
-Chart.register(BarElement, BarController, LineElement, PointElement, LineController, CategoryScale, LinearScale, Tooltip, Legend)
+Chart.register(BarElement, BarController, CategoryScale, LinearScale, Tooltip)
 
 const SPY_SHARES = 3_300_000_000
-const SAMPLE_EVERY = 5 // take every Nth data point to keep bar chart readable
 
 export default function Top7McapPanel({ top7Results, spyResult, activeSector }) {
   const canvasRef = useRef(null)
@@ -25,12 +21,11 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
     const ts = extractTimestamps(spyResult)
     if (spyCloses.length < 2) return
 
-    // Sample indices evenly across the year
+    // Sample ~40 evenly spaced points across the year for readable bars
+    const step = Math.max(1, Math.floor(spyCloses.length / 40))
     const indices = []
-    for (let i = 0; i < spyCloses.length; i += SAMPLE_EVERY) indices.push(i)
-    if (indices[indices.length - 1] !== spyCloses.length - 1) {
-      indices.push(spyCloses.length - 1)
-    }
+    for (let i = 0; i < spyCloses.length; i += step) indices.push(i)
+    if (indices[indices.length - 1] !== spyCloses.length - 1) indices.push(spyCloses.length - 1)
 
     const labels = indices.map(i => {
       if (!ts[i]) return ''
@@ -38,35 +33,45 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     })
 
-    // Build per-stock datasets — each stock's % of S&P 500 mcap at sampled points
-    const datasets = top7Results.map((result, idx) => {
+    // Each stock's % share of S&P 500 mcap at each sampled point
+    const validStocks = top7Results.map((result, idx) => {
       if (!result) return null
       const closes = extractCloses(result)
       if (!closes.length) return null
-      const meta = result.meta
-      const currentPrice = meta.regularMarketPrice
-      const mcap = meta.marketCap
-      if (!currentPrice || !mcap) return null
-      const sharesOut = mcap / currentPrice
+      const price = result.meta?.regularMarketPrice
+      const mcap = result.meta?.marketCap
+      if (!price || !mcap) return null
+      const shares = mcap / price
 
       const data = indices.map(i => {
-        const stockClose = closes[i] ?? closes[closes.length - 1]
-        const spyClose = spyCloses[i]
-        if (!stockClose || !spyClose) return 0
-        return parseFloat(((stockClose * sharesOut) / (spyClose * SPY_SHARES) * 100).toFixed(3))
+        const sc = closes[Math.min(i, closes.length - 1)]
+        const spy = spyCloses[i]
+        if (!sc || !spy) return 0
+        return parseFloat(((sc * shares) / (spy * SPY_SHARES) * 100).toFixed(3))
       })
 
+      return { sym: syms[idx], data, color: TICKER_COLORS[idx], mcap }
+    })
+
+    const datasets = validStocks.map((s, i) => {
+      if (!s) {
+        // empty placeholder so colors stay aligned
+        return {
+          label: syms[i],
+          data: Array(labels.length).fill(0),
+          backgroundColor: 'transparent',
+          stack: 'mcap',
+        }
+      }
       return {
-        label: syms[idx],
-        data,
-        backgroundColor: TICKER_COLORS[idx] + 'cc',
-        borderColor: TICKER_COLORS[idx],
+        label: s.sym,
+        data: s.data,
+        backgroundColor: s.color + 'cc',
+        borderColor: s.color,
         borderWidth: 0,
         stack: 'mcap',
       }
-    }).filter(Boolean)
-
-    if (!datasets.length) return
+    })
 
     chartRef.current = new Chart(canvasRef.current, {
       type: 'bar',
@@ -80,10 +85,14 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}% of S&P 500`,
+              label: ctx => {
+                const v = ctx.parsed.y
+                if (!v) return null
+                return ` ${ctx.dataset.label}: ${v.toFixed(2)}% of S&P 500`
+              },
               footer: items => {
-                const total = items.reduce((s, i) => s + i.parsed.y, 0)
-                return `Total: ${total.toFixed(2)}%`
+                const total = items.reduce((s, i) => s + (i.parsed.y || 0), 0)
+                return `Combined: ${total.toFixed(2)}%`
               },
             },
           },
@@ -97,11 +106,7 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
           y: {
             stacked: true,
             grid: { color: 'rgba(255,255,255,0.05)' },
-            ticks: {
-              color: '#555',
-              font: { size: 10 },
-              callback: v => v.toFixed(1) + '%',
-            },
+            ticks: { color: '#555', font: { size: 10 }, callback: v => v.toFixed(1) + '%' },
           },
         },
       },
@@ -118,17 +123,10 @@ export default function Top7McapPanel({ top7Results, spyResult, activeSector }) 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 12px', marginTop: 10 }}>
         {syms.map((sym, i) => {
           const r = top7Results[i]
-          const mcap = r?.meta?.marketCap
           return (
-            <span key={sym} style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              fontSize: 10, color: 'var(--text-secondary)',
-            }}>
-              <span style={{
-                width: 7, height: 7, borderRadius: 2,
-                background: TICKER_COLORS[i], display: 'inline-block',
-              }} />
-              {sym} {mcap ? fmtMcap(mcap) : '—'}
+            <span key={sym} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-secondary)' }}>
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: TICKER_COLORS[i], display: 'inline-block' }} />
+              {sym} {r?.meta?.marketCap ? fmtMcap(r.meta.marketCap) : '—'}
             </span>
           )
         })}
