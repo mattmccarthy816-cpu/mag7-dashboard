@@ -2,15 +2,13 @@ import React from 'react'
 import Sparkline from './Sparkline'
 import { fmtPrice, fmtMcap, pctChange, extractCloses } from '../api'
 
-export default function TickerCard({ result, sym, name, isSP500 = false, isFav = false, onToggleFav }) {
-  const loading = !result
-
+export default function TickerCard({ result, sym, name, isSP500 = false, isFav = false, onToggleFav, onClick }) {
   const meta = result?.meta
   const price = meta?.regularMarketPrice
   const prev = meta?.chartPreviousClose || meta?.previousClose
   const chg = price && prev ? price - prev : null
   const pct = pctChange(price, prev)
-  const isUp = pct >= 0
+  const isUp = (pct ?? 0) >= 0
   const sign = isUp ? '+' : ''
   const chgColor = isUp ? 'var(--up)' : 'var(--dn)'
   const closes = extractCloses(result)
@@ -18,37 +16,36 @@ export default function TickerCard({ result, sym, name, isSP500 = false, isFav =
   const yearChg = closes.length > 5 ? pctChange(price, closes[0]) : null
 
   return (
-    <div style={{
-      background: 'var(--bg-card)',
-      border: '0.5px solid var(--border)',
-      borderLeft: isSP500 ? '3px solid var(--blue)' : undefined,
-      borderRadius: 'var(--radius)',
-      padding: '10px 12px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 2,
-      position: 'relative',
-    }}>
-      {/* Fav button — not shown on S&P 500 card */}
+    <div
+      onClick={result && !isSP500 ? onClick : undefined}
+      style={{
+        background: 'var(--bg-card)',
+        border: '0.5px solid var(--border)',
+        borderLeft: isSP500 ? '3px solid var(--blue)' : undefined,
+        borderRadius: 'var(--radius)',
+        padding: '10px 12px',
+        display: 'flex', flexDirection: 'column', gap: 2,
+        position: 'relative',
+        cursor: result && !isSP500 ? 'pointer' : 'default',
+        transition: 'border-color 0.15s',
+      }}
+      onMouseEnter={e => { if (result && !isSP500) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)' }}
+      onMouseLeave={e => { if (result && !isSP500) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)' }}
+    >
+      {/* Fav button */}
       {!isSP500 && onToggleFav && (
         <button
-          onClick={() => onToggleFav(sym)}
+          onClick={e => { e.stopPropagation(); onToggleFav(sym) }}
           title={isFav ? 'Remove from favorites' : 'Add to favorites'}
           style={{
-            position: 'absolute',
-            top: 8, right: 8,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 2,
-            lineHeight: 1,
-            fontSize: 13,
+            position: 'absolute', top: 8, right: 8,
+            background: 'none', border: 'none', cursor: 'pointer',
+            padding: 2, lineHeight: 1, fontSize: 13,
             color: isFav ? '#e05050' : 'var(--text-muted)',
-            opacity: isFav ? 1 : 0.4,
-            transition: 'opacity 0.15s, color 0.15s',
+            opacity: isFav ? 1 : 0.4, transition: 'opacity 0.15s, color 0.15s',
           }}
-          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-          onMouseLeave={e => e.currentTarget.style.opacity = isFav ? '1' : '0.4'}
+          onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.opacity = '1' }}
+          onMouseLeave={e => { e.stopPropagation(); e.currentTarget.style.opacity = isFav ? '1' : '0.4' }}
         >
           {isFav ? '♥' : '♡'}
         </button>
@@ -57,11 +54,8 @@ export default function TickerCard({ result, sym, name, isSP500 = false, isFav =
       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', letterSpacing: '0.05em', textTransform: 'uppercase', paddingRight: 18 }}>
         {sym}
       </div>
-      {name && !isSP500 && (
-        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{name}</div>
-      )}
 
-      {loading ? (
+      {!result ? (
         <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>Loading…</div>
       ) : (
         <>
@@ -84,6 +78,11 @@ export default function TickerCard({ result, sym, name, isSP500 = false, isFav =
           <div style={{ marginTop: 6 }}>
             <Sparkline prices={closes} color={sparkColor} height={32} />
           </div>
+          {!isSP500 && (
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 3, textAlign: 'center', opacity: 0.6 }}>
+              click to expand
+            </div>
+          )}
         </>
       )}
     </div>
