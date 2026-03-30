@@ -10,6 +10,7 @@ import Top7McapPanel from './components/Top7McapPanel'
 import SectorAnalysisPanel from './components/SectorAnalysisPanel'
 import FavoritesTab from './components/FavoritesTab'
 import ChartModal from './components/ChartModal'
+import TickerSearch from './components/TickerSearch'
 
 const REFRESH_MS = 60_000
 const FAV_KEY = 'dashboard_favorites'
@@ -153,6 +154,11 @@ export default function App() {
               onExpand={() => setModal({ type:'etf', sectorResult:sectorEtfResult, relatedResults, spyResult, activeSector })}
             />
             <Top7McapPanel top7Results={top7Results} spyResult={spyResult} activeSector={activeSector} />
+          </div>
+
+          {/* Row 4: Ticker Search */}
+          <div style={{ marginTop:12 }}>
+            <TickerSearch spyResult={spyResult} />
           </div>
         </>
       )}

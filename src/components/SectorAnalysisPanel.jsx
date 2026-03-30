@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useRef } from 'react'
 import Panel from './Panel'
 import { extractCloses, pctChange, fmtMcap } from '../api'
 
@@ -34,16 +34,29 @@ export default function SectorAnalysisPanel({ activeSector, top7Results, sectorR
   const [analysis, setAnalysis] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const requestIdRef = useRef(0)
+  const [hasRun, setHasRun] = useState(false)
+  const abortRef = useRef(null)
+
+  // Reset when sector changes
+  const sectorIdRef = useRef(activeSector.id)
+  if (sectorIdRef.current !== activeSector.id) {
+    sectorIdRef.current = activeSector.id
+    // Can't call setState in render body safely, so use a key on the parent instead
+  }
+
   const hasData = top7Results.some(Boolean) && spyResult
 
-  useEffect(() => {
-    if (!hasData) return
-    const myId = ++requestIdRef.current
-    setAnalysis(''); setError(null); setLoading(true)
+  const runAnalysis = () => {
+    if (!hasData || loading) return
+    if (abortRef.current) abortRef.current.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    setAnalysis(''); setError(null); setLoading(true); setHasRun(true)
 
     fetch('/api/analyze', {
       method: 'POST',
+      signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
@@ -57,38 +70,74 @@ export default function SectorAnalysisPanel({ activeSector, top7Results, sectorR
       return data
     })
     .then(data => {
-      if (requestIdRef.current !== myId) return
       const text = data?.content?.[0]?.text ?? ''
-      if (!text) throw new Error('Empty response from API')
+      if (!text) throw new Error('Empty response')
       setAnalysis(text); setLoading(false)
     })
     .catch(err => {
-      if (requestIdRef.current !== myId) return
-      setError(err.message)
-      setLoading(false)
+      if (err.name === 'AbortError') return
+      setError(err.message); setLoading(false)
     })
-  }, [activeSector.id, hasData])
+  }
 
   return (
-    <Panel title={`${activeSector.short} Analysis`} badge="AI · live data">
+    <Panel title={`${activeSector.short} Analysis`} badge="AI · on demand">
+      {!hasRun && !loading && (
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12, padding:'16px 0' }}>
+          <div style={{ fontSize:12, color:'var(--text-muted)', textAlign:'center', lineHeight:1.6 }}>
+            Get an AI-powered analysis of the {activeSector.short} sector based on current price data.
+          </div>
+          <button
+            onClick={runAnalysis}
+            disabled={!hasData}
+            style={{
+              fontSize:12, fontWeight:600,
+              padding:'8px 20px',
+              background: hasData ? activeSector.color + '22' : 'var(--bg-secondary)',
+              border: `1px solid ${hasData ? activeSector.color + '66' : 'var(--border)'}`,
+              borderRadius:8,
+              color: hasData ? activeSector.color : 'var(--text-muted)',
+              cursor: hasData ? 'pointer' : 'default',
+            }}
+          >
+            ✦ Analyze {activeSector.short}
+          </button>
+        </div>
+      )}
+
       {loading && (
         <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-          {[100,85,70].map((w,i) => (
-            <div key={i} style={{ height:12, borderRadius:4, width:w+'%', background:'var(--bg-secondary)', animation:'pulse 1.5s ease-in-out infinite', animationDelay:i*0.2+'s' }} />
+          <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:4, fontStyle:'italic' }}>
+            Analyzing {activeSector.short} sector…
+          </div>
+          {[100,80,65].map((w,i) => (
+            <div key={i} style={{ height:11, borderRadius:4, width:w+'%', background:'var(--bg-secondary)', animation:'pulse 1.5s ease-in-out infinite', animationDelay:i*0.15+'s' }} />
           ))}
           <style>{`@keyframes pulse{0%,100%{opacity:.3}50%{opacity:.7}}`}</style>
         </div>
       )}
+
       {error && !loading && (
-        <div style={{ fontSize:11, color:'#e05050', lineHeight:1.6, background:'rgba(224,80,80,0.08)', borderRadius:6, padding:'8px 10px' }}>
-          {error}
+        <div>
+          <div style={{ fontSize:11, color:'#e05050', lineHeight:1.6, background:'rgba(224,80,80,0.08)', borderRadius:6, padding:'8px 10px', marginBottom:10 }}>
+            {error}
+          </div>
+          <button onClick={runAnalysis} style={{ fontSize:11, padding:'5px 14px', background:'var(--bg-secondary)', border:'0.5px solid var(--border)', borderRadius:6, color:'var(--text-secondary)', cursor:'pointer' }}>
+            ↻ Retry
+          </button>
         </div>
       )}
+
       {analysis && !loading && (
-        <div style={{ fontSize:12.5, lineHeight:1.75, color:'var(--text-primary)' }}>{analysis}</div>
-      )}
-      {!loading && !analysis && !error && (
-        <div style={{ fontSize:12, color:'var(--text-muted)' }}>Waiting for data…</div>
+        <div>
+          <div style={{ fontSize:12.5, lineHeight:1.75, color:'var(--text-primary)' }}>{analysis}</div>
+          <button
+            onClick={runAnalysis}
+            style={{ marginTop:12, fontSize:11, padding:'4px 12px', background:'var(--bg-secondary)', border:'0.5px solid var(--border)', borderRadius:6, color:'var(--text-muted)', cursor:'pointer' }}
+          >
+            ↻ Refresh analysis
+          </button>
+        </div>
       )}
     </Panel>
   )

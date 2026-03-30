@@ -1,16 +1,93 @@
 import React, { useEffect, useRef } from 'react'
-import {
-  Chart, LineElement, PointElement, LineController,
-  CategoryScale, LinearScale, Tooltip,
-} from 'chart.js'
+import { Chart, LineElement, PointElement, LineController, CategoryScale, LinearScale, Tooltip } from 'chart.js'
 import Panel from './Panel'
 import { extractCloses, extractTimestamps, pctChange } from '../api'
 
 Chart.register(LineElement, PointElement, LineController, CategoryScale, LinearScale, Tooltip)
 
-function hexToRgba(hex, opacity) {
+function hexToRgba(hex, op) {
   const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16)
-  return `rgba(${r},${g},${b},${opacity})`
+  return `rgba(${r},${g},${b},${op})`
+}
+
+function applyHover(chart, hovIdx, etfConfigs) {
+  chart.data.datasets.forEach((ds, i) => {
+    const isSPY = ds._isSPY
+    if (hovIdx === null) {
+      ds.borderColor = hexToRgba(ds._color, isSPY ? 0.75 : 0.5)
+      ds.borderWidth = isSPY ? 2 : 1
+    } else if (i === hovIdx) {
+      ds.borderColor = hexToRgba(ds._color, 1)
+      ds.borderWidth = 2.5
+    } else {
+      ds.borderColor = hexToRgba(ds._color, 0.12)
+      ds.borderWidth = 0.8
+    }
+  })
+  chart.update('none')
+}
+
+function buildChart(canvas, etfConfigs, spyCloses, ts, onHoverChange) {
+  const n = spyCloses.length
+  const labels = ts.map(t => new Date(t*1000).toLocaleDateString('en-US', { month:'short', day:'numeric' }))
+
+  const datasets = etfConfigs.map(({ label, result, color, dash }) => {
+    const closes = result ? extractCloses(result) : []
+    const base = closes[0]
+    const data = Array(n).fill(null)
+    for (let i = 0; i < Math.min(closes.length, n); i++) {
+      if (closes[i] && base) data[i] = parseFloat(((closes[i]-base)/base*100).toFixed(2))
+    }
+    const isSPY = label === 'SPY'
+    return {
+      label, data,
+      borderColor: hexToRgba(color, isSPY ? 0.75 : 0.5),
+      borderWidth: isSPY ? 2 : 1,
+      borderDash: dash ?? [],
+      pointRadius: 0, fill: false, tension: 0.3, spanGaps: true,
+      _color: color, _isSPY: isSPY,
+    }
+  })
+
+  return new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.parsed.y == null ? null : ` ${ctx.dataset.label}: ${ctx.parsed.y>=0?'+':''}${ctx.parsed.y.toFixed(2)}%`,
+          },
+          // Use tooltip's beforeUpdate to detect which dataset the cursor is nearest to
+        },
+      },
+      scales: {
+        x: { grid:{display:false}, ticks:{color:'#555', font:{size:10}, maxTicksLimit:8, maxRotation:0} },
+        y: { grid:{color:'rgba(255,255,255,0.05)'}, ticks:{color:'#555', font:{size:10}, callback: v => (v>=0?'+':'')+v.toFixed(0)+'%'} },
+      },
+      onHover: (_evt, activeElements) => {
+        // activeElements contains ALL datasets at the hovered x — find which one
+        // the cursor is physically closest to by y-distance
+        if (!activeElements.length) { onHoverChange(null); return }
+        // We use the first element's dataset index since interaction mode is 'index'
+        // To find nearest LINE, we look at activeElements and pick the one closest to mouse y
+        const evt = _evt.native
+        if (!evt) { onHoverChange(null); return }
+        const rect = canvas.getBoundingClientRect()
+        const mouseY = evt.clientY - rect.top
+        let closest = null, minDist = Infinity
+        activeElements.forEach(el => {
+          const elY = el.element.y
+          const dist = Math.abs(elY - mouseY)
+          if (dist < minDist) { minDist = dist; closest = el.datasetIndex }
+        })
+        onHoverChange(closest)
+      },
+    },
+  })
 }
 
 export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyResult, activeSector, onExpand }) {
@@ -19,11 +96,9 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
   const hoveredRef = useRef(null)
 
   const etfConfigs = [
-    { label: activeSector.etf, result: sectorResult,       color: activeSector.color, dash: [] },
-    ...activeSector.relatedEtfs.map((etf, i) => ({
-      label: etf, result: relatedResults?.[i] ?? null, color: activeSector.color, dash: [],
-    })),
-    { label: 'SPY', result: spyResult, color: '#c8c8d8', dash: [6,3] },
+    { label: activeSector.etf, result: sectorResult, color: activeSector.color, dash: [] },
+    ...activeSector.relatedEtfs.map((etf, i) => ({ label: etf, result: relatedResults?.[i]??null, color: activeSector.color, dash: [] })),
+    { label: 'SPY', result: spyResult, color: '#e0e0f0', dash: [6,3] },
   ]
 
   useEffect(() => {
@@ -34,92 +109,22 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
     const ts = extractTimestamps(spyResult)
     if (spyCloses.length < 2) return
 
-    const n = spyCloses.length
-    const labels = ts.map(t => new Date(t*1000).toLocaleDateString('en-US', { month:'short', day:'numeric' }))
-
-    const datasets = etfConfigs.map(({ label, result, color, dash }) => {
-      const closes = result ? extractCloses(result) : []
-      const base = closes[0]
-      const data = Array(n).fill(null)
-      for (let i = 0; i < Math.min(closes.length, n); i++) {
-        if (closes[i] && base) data[i] = parseFloat(((closes[i]-base)/base*100).toFixed(2))
-      }
-      const isSPY = label === 'SPY'
-      return {
-        label, data,
-        borderColor: hexToRgba(color, isSPY ? 0.75 : 0.5),
-        borderWidth: isSPY ? 2 : 1,
-        borderDash: dash,
-        pointRadius: 0, fill: false, tension: 0.3, spanGaps: true,
-        // Store original color for hover restore
-        _color: color,
-        _isSPY: isSPY,
-      }
-    })
-
-    chartRef.current = new Chart(canvasRef.current, {
-      type: 'line',
-      data: { labels, datasets },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: ctx => ctx.parsed.y == null ? null : ` ${ctx.dataset.label}: ${ctx.parsed.y>=0?'+':''}${ctx.parsed.y.toFixed(2)}%`,
-            },
-          },
-        },
-        scales: {
-          x: { grid:{ display:false }, ticks:{ color:'#555', font:{size:10}, maxTicksLimit:8, maxRotation:0 } },
-          y: { grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#555', font:{size:10}, callback: v => (v>=0?'+':'')+v.toFixed(0)+'%' } },
-        },
-        onHover: (event, elements) => {
-          if (!chartRef.current) return
-          const chart = chartRef.current
-          const hoveredDatasetIndex = elements.length > 0 ? elements[0].datasetIndex : null
-
-          // Check if hover state changed
-          if (hoveredRef.current === hoveredDatasetIndex) return
-          hoveredRef.current = hoveredDatasetIndex
-
-          chart.data.datasets.forEach((ds, i) => {
-            const isSPY = ds._isSPY
-            if (hoveredDatasetIndex === null) {
-              // Nothing hovered — restore defaults
-              ds.borderColor = hexToRgba(ds._color, isSPY ? 0.75 : 0.5)
-              ds.borderWidth = isSPY ? 2 : 1
-            } else if (i === hoveredDatasetIndex) {
-              // This line is hovered — bold + full opacity
-              ds.borderColor = hexToRgba(ds._color, 1)
-              ds.borderWidth = 2.5
-            } else {
-              // Other lines — fade further
-              ds.borderColor = hexToRgba(ds._color, 0.15)
-              ds.borderWidth = isSPY ? 1.5 : 0.8
-            }
-          })
-          chart.update('none')
-        },
-      },
-    })
-
-    // Also handle mouseout on the canvas
-    const canvas = canvasRef.current
-    const handleMouseLeave = () => {
-      if (!chartRef.current) return
-      hoveredRef.current = null
-      chartRef.current.data.datasets.forEach(ds => {
-        ds.borderColor = hexToRgba(ds._color, ds._isSPY ? 0.75 : 0.5)
-        ds.borderWidth = ds._isSPY ? 2 : 1
-      })
-      chartRef.current.update('none')
+    const onHoverChange = (idx) => {
+      if (!chartRef.current || hoveredRef.current === idx) return
+      hoveredRef.current = idx
+      applyHover(chartRef.current, idx, etfConfigs)
     }
-    canvas.addEventListener('mouseleave', handleMouseLeave)
 
+    chartRef.current = buildChart(canvasRef.current, etfConfigs, spyCloses, ts, onHoverChange)
+
+    const canvas = canvasRef.current
+    const onLeave = () => {
+      hoveredRef.current = null
+      if (chartRef.current) applyHover(chartRef.current, null, etfConfigs)
+    }
+    canvas.addEventListener('mouseleave', onLeave)
     return () => {
-      canvas.removeEventListener('mouseleave', handleMouseLeave)
+      canvas.removeEventListener('mouseleave', onLeave)
       if (chartRef.current) chartRef.current.destroy()
     }
   }, [sectorResult, relatedResults, spyResult, activeSector])
@@ -138,7 +143,7 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
           {etfConfigs.map(({ label, color, dash }) => {
             const isSPY = label === 'SPY'
             return (
-              <span key={label} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text-secondary)' }}>
+              <span key={label} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'#e8e8f0' }}>
                 <svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5"
                   stroke={hexToRgba(color, isSPY ? 0.75 : 0.5)}
                   strokeWidth={isSPY ? 2 : 1}
@@ -150,7 +155,7 @@ export default function SectorVsMarketPanel({ sectorResult, relatedResults, spyR
           })}
         </div>
         {onExpand && (
-          <button onClick={onExpand} style={{ fontSize:11, padding:'3px 10px', background:'var(--bg-secondary)', border:'0.5px solid var(--border)', borderRadius:6, color:'var(--text-secondary)', cursor:'pointer', flexShrink:0 }}>
+          <button onClick={onExpand} style={{ fontSize:11, padding:'3px 10px', background:'var(--bg-secondary)', border:'0.5px solid var(--border)', borderRadius:6, color:'#e8e8f0', cursor:'pointer', flexShrink:0 }}>
             ⤢ Expand
           </button>
         )}
