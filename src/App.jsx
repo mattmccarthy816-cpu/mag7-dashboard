@@ -42,7 +42,6 @@ export default function App() {
   const prevSectorId = useRef(null)
 
   const [favorites, setFavorites] = useState(loadFavs)
-  const [favData, setFavData]     = useState({})
   const [modal, setModal]         = useState(null)
 
   const fetchAllBase = useCallback(async () => {
@@ -96,15 +95,6 @@ export default function App() {
     setSectorLoading(false)
     return byRange
   }, [])
-
-  useEffect(() => {
-    if (!favorites.length) return
-    fetchYahooMany(favorites, '1y', '1d').then(results => {
-      const map = {}
-      favorites.forEach((sym,i) => { map[sym] = results[i] })
-      setFavData(map)
-    })
-  }, [favorites])
 
   useEffect(() => {
     const init = async () => {
@@ -191,7 +181,7 @@ export default function App() {
 
       {isFavTab ? (
         <FavoritesTab
-          favorites={favorites} favData={favData} spResult={spResult1Y}
+          favorites={favorites} spResult={spResult1Y}
           onToggleFav={handleToggleFav}
           onClickStock={(sym,result)=>setModal({type:'stock',sym,result})}
         />
