@@ -6,12 +6,10 @@ import TickerCard from './components/TickerCard'
 import SectorMomentumPanel from './components/SectorMomentumPanel'
 import SectorPanel from './components/SectorPanel'
 import SectorVsMarketPanel from './components/SectorVsMarketPanel'
-import Top7McapPanel from './components/Top7McapPanel'
 import SectorAnalysisPanel from './components/SectorAnalysisPanel'
 import FavoritesTab from './components/FavoritesTab'
 import ChartModal from './components/ChartModal'
 import TickerSearch from './components/TickerSearch'
-import EarningsCalendar from './components/EarningsCalendar'
 import SectorHeatmap from './components/SectorHeatmap'
 import NewsFeed from './components/NewsFeed'
 import AllStocksHeatmap from './components/AllStocksHeatmap'
@@ -192,7 +190,7 @@ export default function App() {
       {isFavTab ? (
         <FavoritesTab
           favorites={favorites}
-          spResult={spResult1Y}
+          spRangeMap={spRangeMap}
           onToggleFav={handleToggleFav}
           onClickStock={(sym,result) => setModal({type:'stock',sym,result})}
         />
@@ -226,25 +224,27 @@ export default function App() {
           </div>
 
           {/* Row 3 */}
-          <div style={{display:'grid',gridTemplateColumns:'3fr 2fr',gap:12,marginBottom:12,...fade}} className="bot-row">
+          <div style={{display:'grid',gridTemplateColumns:'1fr',gap:12,marginBottom:12,...fade}}>
             <SectorVsMarketPanel
               allRangeData={sectorByRange}
               activeSector={activeSector}
               onExpand={() => setModal({type:'etf', sectorResult:sectorByRange['1Y']?.etf??null, relatedResults:sectorByRange['1Y']?.related??[], spyResult:spyResult1Y, activeSector})}
             />
-            <Top7McapPanel allRangeData={sectorByRange} activeSector={activeSector}/>
           </div>
 
           {/* Row 4 */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12,...fade}} className="mid-row">
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12,...fade}} className="mid-row">
             <SectorHeatmap sectorEtfResults={heatmapEtfs} spyResult={spyResult1Y} activeSector={activeSector} onSectorClick={handleSectorChange}/>
-            <EarningsCalendar syms={activeSector.top7} activeSector={activeSector}/>
             <NewsFeed syms={activeSector.top7} activeSector={activeSector}/>
           </div>
 
           {/* Row 5: All stocks heatmap */}
           <div style={{...fade}}>
-            <AllStocksHeatmap allSectorData={allTop7Data} onTickerClick={(sym,result) => setModal({type:'stock',sym,result})}/>
+            <AllStocksHeatmap
+              allSectorData={allTop7Data}
+              spyResult={spyResult1Y}
+              onTickerClick={(sym,result) => setModal({type:'stock',sym,result})}
+            />
           </div>
         </>
       )}

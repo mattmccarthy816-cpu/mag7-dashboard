@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import TickerCard from './TickerCard'
 import { fetchYahooMany } from '../api'
 
@@ -10,47 +10,43 @@ const RANGE_CONFIGS = [
   { label:'1Y', range:'1y',  interval:'1d'  },
 ]
 
-export default function FavoritesTab({ favorites, spResult, onToggleFav, onClickStock }) {
-  // allRangeData: { sym: { '1D': result, '1W': result, ... } }
+const EMPTY_RANGES = { '1D':null,'1W':null,'1M':null,'3M':null,'1Y':null }
+
+export default function FavoritesTab({ favorites = [], spRangeMap = {}, onToggleFav, onClickStock }) {
   const [allRangeData, setAllRangeData] = useState({})
   const [loading, setLoading] = useState(false)
+  const mountedRef = useRef(true)
 
   useEffect(() => {
-    if (!favorites.length) return
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  useEffect(() => {
+    if (!favorites || favorites.length === 0) { setAllRangeData({}); return }
     setLoading(true)
 
     Promise.all(
       RANGE_CONFIGS.map(rc =>
-        fetchYahooMany(favorites, rc.range, rc.interval).then(results => ({ label: rc.label, results }))
+        fetchYahooMany(favorites, rc.range, rc.interval)
+          .then(results => ({ label: rc.label, results }))
+          .catch(() => ({ label: rc.label, results: favorites.map(() => null) }))
       )
     ).then(allRanges => {
+      if (!mountedRef.current) return
       const map = {}
       favorites.forEach((sym, i) => {
         map[sym] = {}
         allRanges.forEach(({ label, results }) => {
-          map[sym][label] = results[i] ?? null
+          map[sym][label] = results?.[i] ?? null
         })
       })
       setAllRangeData(map)
       setLoading(false)
-    })
-  }, [favorites.join(',')])
+    }).catch(() => { if (mountedRef.current) setLoading(false) })
+  }, [(favorites || []).join(',')])
 
-  // S&P 500 ranges
-  const [spRanges, setSpRanges] = useState({})
-  useEffect(() => {
-    Promise.all(
-      RANGE_CONFIGS.map(rc =>
-        fetchYahooMany(['^GSPC'], rc.range, rc.interval).then(r => ({ label: rc.label, result: r[0] }))
-      )
-    ).then(ranges => {
-      const map = {}
-      ranges.forEach(({ label, result }) => { map[label] = result })
-      setSpRanges(map)
-    })
-  }, [])
-
-  if (favorites.length === 0) {
+  if (!favorites || favorites.length === 0) {
     return (
       <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'60px 20px', gap:12, color:'var(--text-muted)', textAlign:'center' }}>
         <div style={{ fontSize:32, opacity:0.3 }}>♡</div>
@@ -63,25 +59,30 @@ export default function FavoritesTab({ favorites, spResult, onToggleFav, onClick
   return (
     <div>
       {loading && (
-        <div style={{ fontSize:12, color:'var(--text-muted)', padding:'12px 0', marginBottom:8 }}>
-          Loading range data for favorites…
+        <div style={{ fontSize:11, color:'var(--text-muted)', padding:'8px 0', marginBottom:4 }}>
+          Fetching all time ranges…
         </div>
       )}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4, minmax(0,1fr))', gap:8, marginBottom:12 }} className="ticker-row">
         {favorites.map(sym => (
           <TickerCard
-            key={sym}
-            allRangeResults={allRangeData[sym] ?? { '1D':null,'1W':null,'1M':null,'3M':null,'1Y':null }}
+            key={`fav-${sym}`}
+            allRangeResults={allRangeData[sym] ?? EMPTY_RANGES}
             sym={sym}
             isFav
             onToggleFav={onToggleFav}
             onClick={() => onClickStock?.(sym, allRangeData[sym]?.['1Y'] ?? null)}
           />
         ))}
-        <TickerCard allRangeResults={spRanges} sym="S&P 500" isSP500 />
+        <TickerCard
+          key="fav-sp500"
+          allRangeResults={spRangeMap && Object.keys(spRangeMap).length > 0 ? spRangeMap : EMPTY_RANGES}
+          sym="S&P 500"
+          isSP500
+        />
       </div>
       <div style={{ marginTop:8, fontSize:12, color:'var(--text-muted)', padding:'12px 16px', background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:'var(--radius)' }}>
-        {favorites.length} favorited stock{favorites.length!==1?'s':''} · All time ranges available · Click any card to expand
+        {favorites.length} favorited stock{favorites.length !== 1 ? 's' : ''} · All time ranges available · Click any card to expand
       </div>
     </div>
   )
