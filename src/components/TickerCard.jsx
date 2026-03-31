@@ -33,27 +33,21 @@ function WeekRange({ closes, price }) {
   const high = Math.max(...closes)
   const low  = Math.min(...closes)
   if (high === low) return null
-  const pct = ((price - low) / (high - low)) * 100
+  const pct = Math.max(0, Math.min(100, ((price - low) / (high - low)) * 100))
+  const dotColor = pct > 75 ? '#1fb87a' : pct < 25 ? '#e05050' : '#e8a835'
   return (
-    <div style={{ marginTop:4 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text-muted)', marginBottom:2 }}>
+    <div style={{ marginTop:5 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text-muted)', marginBottom:3 }}>
         <span>${low.toFixed(0)}</span>
-        <span style={{ fontSize:9, color:'var(--text-muted)' }}>52w range</span>
+        <span>52w</span>
         <span>${high.toFixed(0)}</span>
       </div>
-      <div style={{ position:'relative', height:4, background:'var(--bg-secondary)', borderRadius:2 }}>
+      <div style={{ position:'relative', height:3, background:'rgba(255,255,255,0.08)', borderRadius:2 }}>
         <div style={{
-          position:'absolute', left:0, top:0, height:'100%',
-          width: pct+'%',
-          background: pct > 80 ? '#1fb87a' : pct < 20 ? '#e05050' : '#e8a835',
-          borderRadius:2,
-          minWidth:4,
-        }}/>
-        <div style={{
-          position:'absolute', top:-2, width:8, height:8,
-          background:'var(--text-primary)', borderRadius:'50%',
+          position:'absolute', top:-3, width:9, height:9,
+          background: dotColor, borderRadius:'50%',
           left: `calc(${pct}% - 4px)`,
-          boxShadow:'0 0 0 1.5px var(--bg-card)',
+          boxShadow:`0 0 0 2px var(--bg-card), 0 0 0 3px ${dotColor}44`,
         }}/>
       </div>
     </div>
