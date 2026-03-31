@@ -16,16 +16,21 @@ function getRaw(result) {
 }
 
 export default function Top7McapPanel({ allRangeData, activeSector }) {
-  const canvasRef    = useRef(null)
-  const chartRef     = useRef(null)
+  const canvasRef      = useRef(null)
+  const chartRef       = useRef(null)
+  const allRangeRef    = useRef(allRangeData)
   const [activeRange, setActiveRange] = useState('1Y')
   const [status, setStatus]           = useState('Waiting for data…')
   const syms = activeSector.top7
 
-  // Pull top7 directly from whichever range is selected
+  // Keep ref in sync so useEffect always sees latest data
+  allRangeRef.current = allRangeData
+
   const top7Results = allRangeData?.[activeRange]?.top7 ?? []
+  const hasData = top7Results.some(Boolean)
 
   useEffect(() => {
+    if (!hasData) return
     if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null }
     if (!canvasRef.current) return
 
@@ -134,7 +139,7 @@ export default function Top7McapPanel({ allRangeData, activeSector }) {
     })
 
     return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current=null } }
-  }, [top7Results, activeSector, activeRange])
+  }, [hasData, activeSector.id, activeRange])
 
   return (
     <Panel title={`Top 7 ${activeSector.short} — Sector Weight`} badge="% of sector mcap">

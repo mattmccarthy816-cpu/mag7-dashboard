@@ -1,3 +1,4 @@
+// Earnings dates via Yahoo Finance chart meta — most reliable free approach
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET')
@@ -14,33 +15,29 @@ export default async function handler(req, res) {
   }
 
   const results = await Promise.all(syms.map(async sym => {
-    // Try both query endpoints and both module combos
-    const urls = [
-      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=calendarEvents`,
-      `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=calendarEvents`,
-    ]
-    for (const url of urls) {
-      try {
-        const r = await fetch(url, { headers })
-        if (!r.ok) continue
-        const data = await r.json()
-        const result = data?.quoteSummary?.result?.[0]
-        if (!result) continue
-        const earningsDates = result.calendarEvents?.earnings?.earningsDate ?? []
-        const nextTs = earningsDates.length ? earningsDates[0]?.raw : null
-        return { sym, nextEarnings: nextTs }
-      } catch {}
-    }
-
-    // Fallback: use chart API meta field which sometimes has earningsTimestamp
+    // Method 1: quoteSummary calendarEvents (best data, sometimes rate limited)
     try {
-      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`
-      const r = await fetch(url, { headers })
+      const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=calendarEvents`
+      const r = await fetch(url, { headers, signal: AbortSignal.timeout(5000) })
       if (r.ok) {
         const data = await r.json()
-        const meta = data?.chart?.result?.[0]?.meta
-        const ts = meta?.earningsTimestamp ?? meta?.earningsTimestampStart ?? null
-        return { sym, nextEarnings: ts }
+        const dates = data?.quoteSummary?.result?.[0]?.calendarEvents?.earnings?.earningsDate ?? []
+        if (dates.length) {
+          return { sym, nextEarnings: dates[0].raw }
+        }
+      }
+    } catch {}
+
+    // Method 2: chart API meta earningsTimestamp fields
+    try {
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=5d`
+      const r = await fetch(url, { headers, signal: AbortSignal.timeout(5000) })
+      if (r.ok) {
+        const data = await r.json()
+        const meta = data?.chart?.result?.[0]?.meta ?? {}
+        // earningsTimestampEnd is the END of the earnings window (most accurate)
+        const ts = meta.earningsTimestampEnd ?? meta.earningsTimestamp ?? meta.earningsTimestampStart ?? null
+        if (ts) return { sym, nextEarnings: ts }
       }
     } catch {}
 
