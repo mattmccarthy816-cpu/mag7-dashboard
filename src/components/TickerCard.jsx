@@ -14,13 +14,13 @@ function Sparkline({ closes, color }) {
     chartRef.current = new Chart(canvasRef.current, {
       type: 'line',
       data: {
-        labels: closes.map((_, i) => i),
-        datasets: [{ data: closes, borderColor: color, borderWidth: 1.5, pointRadius: 0, fill: true, backgroundColor: color + '18', tension: 0.3 }],
+        labels: closes.map((_,i) => i),
+        datasets: [{ data: closes, borderColor: color, borderWidth: 1.5, pointRadius: 0, fill: true, backgroundColor: color+'18', tension: 0.3 }],
       },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: { x: { display: false }, y: { display: false, min: Math.min(...closes)*0.995, max: Math.max(...closes)*1.005 } },
+        plugins: { legend:{display:false}, tooltip:{enabled:false} },
+        scales: { x:{display:false}, y:{display:false, min:Math.min(...closes)*0.995, max:Math.max(...closes)*1.005} },
       },
     })
     return () => { if (chartRef.current) chartRef.current.destroy() }
@@ -28,11 +28,44 @@ function Sparkline({ closes, color }) {
   return <div style={{ position:'relative', width:'100%', height:32 }}><canvas ref={canvasRef}/></div>
 }
 
-// allRangeResults: { '1D': result, '1W': result, ... } for this specific stock
+function WeekRange({ closes, price }) {
+  if (!closes.length || !price) return null
+  const high = Math.max(...closes)
+  const low  = Math.min(...closes)
+  if (high === low) return null
+  const pct = ((price - low) / (high - low)) * 100
+  return (
+    <div style={{ marginTop:4 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text-muted)', marginBottom:2 }}>
+        <span>${low.toFixed(0)}</span>
+        <span style={{ fontSize:9, color:'var(--text-muted)' }}>52w range</span>
+        <span>${high.toFixed(0)}</span>
+      </div>
+      <div style={{ position:'relative', height:4, background:'var(--bg-secondary)', borderRadius:2 }}>
+        <div style={{
+          position:'absolute', left:0, top:0, height:'100%',
+          width: pct+'%',
+          background: pct > 80 ? '#1fb87a' : pct < 20 ? '#e05050' : '#e8a835',
+          borderRadius:2,
+          minWidth:4,
+        }}/>
+        <div style={{
+          position:'absolute', top:-2, width:8, height:8,
+          background:'var(--text-primary)', borderRadius:'50%',
+          left: `calc(${pct}% - 4px)`,
+          boxShadow:'0 0 0 1.5px var(--bg-card)',
+        }}/>
+      </div>
+    </div>
+  )
+}
+
 export default function TickerCard({ allRangeResults, sym, isSP500=false, isFav=false, onToggleFav, onClick }) {
   const [activeRange, setActiveRange] = useState('1D')
 
-  const result = allRangeResults?.[activeRange] ?? null
+  const result  = allRangeResults?.[activeRange] ?? null
+  const result1Y = allRangeResults?.['1Y'] ?? null
+
   const meta   = result?.meta
   const price  = meta?.regularMarketPrice
   const prev   = meta?.chartPreviousClose || meta?.previousClose
@@ -40,7 +73,8 @@ export default function TickerCard({ allRangeResults, sym, isSP500=false, isFav=
   const isUp   = (pct ?? 0) >= 0
   const chgColor = isUp ? 'var(--up)' : 'var(--dn)'
 
-  const closes = (result?.indicators?.quote?.[0]?.close ?? []).filter(v => v != null)
+  const closes   = (result?.indicators?.quote?.[0]?.close ?? []).filter(v => v != null)
+  const closes1Y = (result1Y?.indicators?.quote?.[0]?.close ?? []).filter(v => v != null)
   const sparkColor = isUp ? '#1fb87a' : '#e05050'
   const rangeChg = closes.length > 1 ? pctChange(closes[closes.length-1], closes[0]) : null
 
@@ -69,9 +103,9 @@ export default function TickerCard({ allRangeResults, sym, isSP500=false, isFav=
 
       <div style={{fontSize:11,fontWeight:600,color:'var(--text-secondary)',letterSpacing:'0.05em',textTransform:'uppercase',paddingRight:18}}>{sym}</div>
 
-      {/* Range toggle */}
+      {/* Range toggle — stop propagation so click doesn't open modal */}
       <div onClick={e=>e.stopPropagation()} style={{marginTop:2,marginBottom:2}}>
-        <RangeToggle active={activeRange} onChange={r=>setActiveRange(r.label)} color={isSP500?'#4a8fd4':'#888892'} />
+        <RangeToggle active={activeRange} onChange={r=>setActiveRange(r.label)} color={isSP500?'#4a8fd4':'#888892'}/>
       </div>
 
       {!result ? (
@@ -79,9 +113,9 @@ export default function TickerCard({ allRangeResults, sym, isSP500=false, isFav=
       ) : (
         <>
           <div style={{fontSize:17,fontWeight:500,color:'var(--text-primary)',marginTop:2}}>${fmtPrice(price)}</div>
-          <div style={{display:'flex',gap:8,alignItems:'baseline'}}>
+          <div style={{display:'flex',gap:8,alignItems:'baseline',flexWrap:'wrap'}}>
             <div style={{fontSize:11,fontWeight:500,color:chgColor}}>{isUp?'+':''}{pct?.toFixed(2)}% today</div>
-            {activeRange!=='1D' && rangeChg!=null && (
+            {activeRange !== '1D' && rangeChg != null && (
               <div style={{fontSize:10,color:rangeChg>=0?'var(--up)':'var(--dn)'}}>
                 {rangeChg>=0?'+':''}{rangeChg.toFixed(1)}% {activeRange}
               </div>
@@ -89,7 +123,9 @@ export default function TickerCard({ allRangeResults, sym, isSP500=false, isFav=
           </div>
           {!isSP500 && <div style={{fontSize:10,color:'var(--text-secondary)'}}>{fmtMcap(meta?.marketCap)}</div>}
           <div style={{marginTop:4}}><Sparkline closes={closes} color={sparkColor}/></div>
-          {!isSP500 && <div style={{fontSize:9,color:'var(--text-muted)',textAlign:'center',opacity:0.5,marginTop:1}}>click to expand</div>}
+          {/* 52-week range bar — always from 1Y data */}
+          {!isSP500 && closes1Y.length > 0 && <WeekRange closes={closes1Y} price={price}/>}
+          {!isSP500 && <div style={{fontSize:9,color:'var(--text-muted)',textAlign:'center',opacity:0.5,marginTop:3}}>click to expand</div>}
         </>
       )}
     </div>
