@@ -14,11 +14,12 @@ import TickerSearch from './components/TickerSearch'
 import EarningsCalendar from './components/EarningsCalendar'
 import SectorHeatmap from './components/SectorHeatmap'
 import NewsFeed from './components/NewsFeed'
+import AllStocksHeatmap from './components/AllStocksHeatmap'
 
-const REFRESH_MS  = 60_000
-const FAV_KEY     = 'dashboard_favorites'
-const loadFavs    = () => { try { return JSON.parse(localStorage.getItem(FAV_KEY)||'[]') } catch { return [] } }
-const saveFavs    = f  => { try { localStorage.setItem(FAV_KEY,JSON.stringify(f)) } catch {} }
+const REFRESH_MS = 60_000
+const FAV_KEY    = 'dashboard_favorites'
+const loadFavs   = () => { try { return JSON.parse(localStorage.getItem(FAV_KEY)||'[]') } catch { return [] } }
+const saveFavs   = f  => { try { localStorage.setItem(FAV_KEY, JSON.stringify(f)) } catch {} }
 
 const RANGE_CONFIGS = [
   { label:'1D', range:'1d',  interval:'5m'  },
@@ -29,21 +30,21 @@ const RANGE_CONFIGS = [
 ]
 
 export default function App() {
-  const [activeSector, setActiveSector]     = useState(SECTORS[0])
-  const [baseByRange, setBaseByRange]       = useState({})
-  const [sectorByRange, setSectorByRange]   = useState({})
-  const [heatmapData, setHeatmapData]       = useState({})   // { sectorId: 1Y ETF result }
-  const [lastUpdated, setLastUpdated]       = useState(null)
-  const [loading, setLoading]               = useState(true)
-  const [sectorLoading, setSectorLoading]   = useState(false)
-  const sectorCache = useRef({})
+  const [activeSector, setActiveSector]   = useState(SECTORS[0])
+  const [baseByRange, setBaseByRange]     = useState({})
+  const [sectorByRange, setSectorByRange] = useState({})
+  const [heatmapEtfs, setHeatmapEtfs]    = useState({}) // { sectorId: 1Y ETF result }
+  const [allTop7Data, setAllTop7Data]     = useState({}) // { sectorId: [top7 1Y results] }
+  const [lastUpdated, setLastUpdated]     = useState(null)
+  const [loading, setLoading]             = useState(true)
+  const [sectorLoading, setSectorLoading] = useState(false)
+  const sectorCache  = useRef({})
   const prevSectorId = useRef(null)
 
   const [favorites, setFavorites] = useState(loadFavs)
   const [favData, setFavData]     = useState({})
   const [modal, setModal]         = useState(null)
 
-  // Fetch base S&P500 + SPY for all ranges
   const fetchAllBase = useCallback(async () => {
     const results = await Promise.all(
       RANGE_CONFIGS.map(rc => fetchYahooMany(['^GSPC','SPY'], rc.range, rc.interval))
@@ -54,16 +55,31 @@ export default function App() {
     return byRange
   }, [])
 
-  // Fetch heatmap: all 11 sector ETFs at 1Y
-  const fetchHeatmap = useCallback(async () => {
+  // Fetch all 11 sector ETFs + all top7s for heatmaps (1Y only, background)
+  const fetchHeatmapData = useCallback(async () => {
+    // ETFs for sector rotation heatmap
     const etfSyms = SECTORS.map(s => s.etf)
-    const results = await fetchYahooMany(etfSyms, '1y', '1d')
-    const map = {}
-    SECTORS.forEach((s,i) => { map[s.id] = results[i] })
-    setHeatmapData(map)
+    const etfResults = await fetchYahooMany(etfSyms, '1y', '1d')
+    const etfMap = {}
+    SECTORS.forEach((s,i) => { etfMap[s.id] = etfResults[i] })
+    setHeatmapEtfs(etfMap)
+
+    // All top7s for all-stocks heatmap — batch in groups of 10 to avoid huge requests
+    const allTop7Map = {}
+    // Initialize
+    SECTORS.forEach(s => { allTop7Map[s.id] = Array(7).fill(null) })
+
+    // Fetch all 77 stocks in parallel batches
+    const allSyms = SECTORS.flatMap(s => s.top7)
+    const allResults = await fetchYahooMany(allSyms, '1y', '1d')
+    let idx = 0
+    SECTORS.forEach(s => {
+      allTop7Map[s.id] = allResults.slice(idx, idx + s.top7.length)
+      idx += s.top7.length
+    })
+    setAllTop7Data(allTop7Map)
   }, [])
 
-  // Fetch all ranges for a sector
   const fetchAllSector = useCallback(async (sector, base, force=false) => {
     setSectorLoading(true)
     const byRange = {}
@@ -72,12 +88,7 @@ export default function App() {
       if (!force && sectorCache.current[key]) { byRange[rc.label] = sectorCache.current[key]; return }
       const syms = [...sector.top7, sector.etf, ...sector.relatedEtfs]
       const results = await fetchYahooMany(syms, rc.range, rc.interval)
-      const data = {
-        top7:    results.slice(0,7),
-        etf:     results[7],
-        related: results.slice(8, 8+sector.relatedEtfs.length),
-        spy:     base?.[rc.label]?.spy ?? null,
-      }
+      const data = { top7:results.slice(0,7), etf:results[7], related:results.slice(8,8+sector.relatedEtfs.length), spy:base?.[rc.label]?.spy??null }
       sectorCache.current[key] = data
       byRange[rc.label] = data
     }))
@@ -86,7 +97,6 @@ export default function App() {
     return byRange
   }, [])
 
-  // Favorites
   useEffect(() => {
     if (!favorites.length) return
     fetchYahooMany(favorites, '1y', '1d').then(results => {
@@ -96,14 +106,13 @@ export default function App() {
     })
   }, [favorites])
 
-  // Init
   useEffect(() => {
     const init = async () => {
       setLoading(true)
       const base = await fetchAllBase()
       await Promise.all([
         fetchAllSector(SECTORS[0], base),
-        fetchHeatmap(),
+        fetchHeatmapData(),
       ])
       prevSectorId.current = SECTORS[0].id
       setLastUpdated(new Date())
@@ -114,7 +123,7 @@ export default function App() {
       sectorCache.current = {}
       const base = await fetchAllBase()
       if (activeSector.id !== 'favorites') fetchAllSector(activeSector, base, true)
-      fetchHeatmap()
+      fetchHeatmapData()
       setLastUpdated(new Date())
     }, REFRESH_MS)
     return () => clearInterval(id)
@@ -139,14 +148,14 @@ export default function App() {
     setLoading(true); sectorCache.current = {}
     const base = await fetchAllBase()
     await Promise.all([
-      activeSector.id !== 'favorites' ? fetchAllSector(activeSector, base, true) : Promise.resolve(),
-      fetchHeatmap(),
+      activeSector.id!=='favorites' ? fetchAllSector(activeSector,base,true) : Promise.resolve(),
+      fetchHeatmapData(),
     ])
     setLastUpdated(new Date()); setLoading(false)
   }
 
   const isFavTab    = activeSector.id === 'favorites'
-  const fade        = { opacity: sectorLoading ? 0.45 : 1, transition: 'opacity 0.2s' }
+  const fade        = { opacity:sectorLoading?0.45:1, transition:'opacity 0.2s' }
   const spResult1Y  = baseByRange['1Y']?.sp  ?? null
   const spyResult1Y = baseByRange['1Y']?.spy ?? null
 
@@ -161,8 +170,6 @@ export default function App() {
     return out
   }
 
-  const top7Syms1Y = activeSector.top7
-
   return (
     <div>
       {/* Header */}
@@ -173,7 +180,7 @@ export default function App() {
         </div>
         <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
           <TickerSearch spyResult={spyResult1Y} onAddFavorite={handleToggleFav} favorites={favorites}/>
-          {lastUpdated && <span style={{fontSize:11,color:'var(--text-muted)'}}>Updated {lastUpdated.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</span>}
+          {lastUpdated&&<span style={{fontSize:11,color:'var(--text-muted)'}}>Updated {lastUpdated.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</span>}
           <button onClick={handleRefresh} disabled={loading} style={{fontSize:11,padding:'5px 12px',background:'var(--bg-secondary)',border:'0.5px solid var(--border-strong)',borderRadius:'var(--radius-sm)',color:'var(--text-secondary)',cursor:loading?'default':'pointer'}}>
             {loading?'Refreshing…':'↻ Refresh'}
           </button>
@@ -192,10 +199,9 @@ export default function App() {
         <>
           {/* Row 1: Ticker cards */}
           <div style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:8,marginBottom:12,...fade}} className="ticker-row">
-            {activeSector.top7.map((sym,i) => (
+            {activeSector.top7.map((sym,i)=>(
               <TickerCard key={sym}
-                allRangeResults={buildCardRanges(i)}
-                sym={sym}
+                allRangeResults={buildCardRanges(i)} sym={sym}
                 isFav={favorites.includes(sym)} onToggleFav={handleToggleFav}
                 onClick={()=>setModal({type:'stock',sym,result:sectorByRange['1Y']?.top7?.[i]??null})}
               />
@@ -206,35 +212,31 @@ export default function App() {
           {/* Row 2: Momentum | Analysis | Sector breakdown */}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12,...fade}} className="mid-row">
             <SectorMomentumPanel top7Results={sectorByRange['1Y']?.top7??[]} activeSector={activeSector}/>
-            <SectorAnalysisPanel
-              activeSector={activeSector}
-              top7Results={sectorByRange['1Y']?.top7??[]}
-              sectorResult={sectorByRange['1Y']?.etf??null}
-              spyResult={spyResult1Y}
-            />
+            <SectorAnalysisPanel activeSector={activeSector} top7Results={sectorByRange['1Y']?.top7??[]} sectorResult={sectorByRange['1Y']?.etf??null} spyResult={spyResult1Y}/>
             <SectorPanel activeSector={activeSector}/>
           </div>
 
           {/* Row 3: ETF chart | Sector weight */}
           <div style={{display:'grid',gridTemplateColumns:'3fr 2fr',gap:12,marginBottom:12,...fade}} className="bot-row">
-            <SectorVsMarketPanel
-              allRangeData={sectorByRange}
-              activeSector={activeSector}
+            <SectorVsMarketPanel allRangeData={sectorByRange} activeSector={activeSector}
               onExpand={()=>setModal({type:'etf',sectorResult:sectorByRange['1Y']?.etf??null,relatedResults:sectorByRange['1Y']?.related??[],spyResult:spyResult1Y,activeSector})}
             />
             <Top7McapPanel allRangeData={sectorByRange} activeSector={activeSector}/>
           </div>
 
-          {/* Row 4: Heatmap | Earnings | News */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,...fade}} className="mid-row">
-            <SectorHeatmap
-              sectorEtfResults={heatmapData}
-              spyResult={spyResult1Y}
-              activeSector={activeSector}
-              onSectorClick={handleSectorChange}
+          {/* Row 4: Sector heatmap | Earnings | News */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12,...fade}} className="mid-row">
+            <SectorHeatmap sectorEtfResults={heatmapEtfs} spyResult={spyResult1Y} activeSector={activeSector} onSectorClick={handleSectorChange}/>
+            <EarningsCalendar syms={activeSector.top7} activeSector={activeSector}/>
+            <NewsFeed syms={activeSector.top7} activeSector={activeSector}/>
+          </div>
+
+          {/* Row 5: All stocks heatmap — full width */}
+          <div style={{...fade}}>
+            <AllStocksHeatmap
+              allSectorData={allTop7Data}
+              onTickerClick={(sym,result)=>setModal({type:'stock',sym,result})}
             />
-            <EarningsCalendar syms={top7Syms1Y} activeSector={activeSector}/>
-            <NewsFeed syms={top7Syms1Y} activeSector={activeSector}/>
           </div>
         </>
       )}

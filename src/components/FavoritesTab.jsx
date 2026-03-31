@@ -12,20 +12,31 @@ export default function FavoritesTab({ favorites, favData, spResult, onToggleFav
     )
   }
 
+  // FavoritesTab only has 1Y data — wrap it in allRangeResults shape so TickerCard works
+  const wrapResult = (r) => {
+    if (!r) return { '1D':null,'1W':null,'1M':null,'3M':null,'1Y':null }
+    return { '1D':r, '1W':r, '1M':r, '3M':r, '1Y':r }
+  }
+
+  const spRanges = wrapResult(spResult)
+
   return (
     <div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4, minmax(0,1fr))', gap:8, marginBottom:12 }} className="ticker-row">
         {favorites.map(sym => (
           <TickerCard
-            key={sym} result={favData[sym]??null} sym={sym}
-            isFav onToggleFav={onToggleFav}
+            key={sym}
+            allRangeResults={wrapResult(favData[sym]??null)}
+            sym={sym}
+            isFav
+            onToggleFav={onToggleFav}
             onClick={() => onClickStock?.(sym, favData[sym]??null)}
           />
         ))}
-        <TickerCard result={spResult} sym="S&P 500" name="^GSPC" isSP500 />
+        <TickerCard allRangeResults={spRanges} sym="S&P 500" isSP500 />
       </div>
       <div style={{ marginTop:8, fontSize:12, color:'var(--text-muted)', padding:'12px 16px', background:'var(--bg-card)', border:'0.5px solid var(--border)', borderRadius:'var(--radius)' }}>
-        {favorites.length} favorited stock{favorites.length!==1?'s':''} vs S&P 500 · Click any card to expand
+        {favorites.length} favorited stock{favorites.length!==1?'s':''} vs S&P 500 · Click any card to expand · Note: only 1Y data available here
       </div>
     </div>
   )

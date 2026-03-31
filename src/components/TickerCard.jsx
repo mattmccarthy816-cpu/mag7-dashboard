@@ -84,8 +84,8 @@ export default function TickerCard({ allRangeResults, sym, isSP500=false, isFav=
         cursor: result && !isSP500 ? 'pointer' : 'default',
         transition:'border-color 0.15s',
       }}
-      onMouseEnter={e=>{ if(!isSP500) e.currentTarget.style.borderColor='rgba(255,255,255,0.2)' }}
-      onMouseLeave={e=>{ if(!isSP500) e.currentTarget.style.borderColor='' }}
+      onMouseEnter={e=>{ if(!isSP500) e.currentTarget.style.setProperty('border-color','rgba(255,255,255,0.2)') }}
+      onMouseLeave={e=>{ if(!isSP500) e.currentTarget.style.removeProperty('border-color') }}
     >
       {!isSP500 && onToggleFav && (
         <button onClick={e=>{e.stopPropagation();onToggleFav(sym)}}
