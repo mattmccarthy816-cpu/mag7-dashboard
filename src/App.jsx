@@ -17,41 +17,39 @@ import StockScreener from './components/StockScreener'
 
 const REFRESH_MS = 60_000
 const FAV_KEY    = 'dashboard_favorites'
-const loadFavs   = () => { try { return JSON.parse(localStorage.getItem(FAV_KEY)||'[]') } catch { return [] } }
+const loadFavs   = () => { try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]') } catch { return [] } }
 const saveFavs   = f  => { try { localStorage.setItem(FAV_KEY, JSON.stringify(f)) } catch {} }
 
 const RANGE_CONFIGS = [
-  { label:'1D', range:'1d',  interval:'5m'  },
-  { label:'1W', range:'5d',  interval:'15m' },
-  { label:'1M', range:'1mo', interval:'1d'  },
-  { label:'3M', range:'3mo', interval:'1d'  },
-  { label:'1Y', range:'1y',  interval:'1d'  },
+  { label: '1D', range: '1d',  interval: '5m'  },
+  { label: '1W', range: '5d',  interval: '15m' },
+  { label: '1M', range: '1mo', interval: '1d'  },
+  { label: '3M', range: '3mo', interval: '1d'  },
+  { label: '1Y', range: '1y',  interval: '1d'  },
 ]
 
 export default function App() {
   const [activeSector, setActiveSector]   = useState(SECTORS[0])
-
-  // sectorByRange: { '1D': { top7, etf, related, spy }, '1W': ..., ... }
-  // Each range is populated independently as it arrives — no race condition
   const [sectorByRange, setSectorByRange] = useState({})
   const [baseByRange, setBaseByRange]     = useState({})
   const [heatmapEtfs, setHeatmapEtfs]    = useState({})
   const [allTop7Data, setAllTop7Data]     = useState({})
   const [lastUpdated, setLastUpdated]     = useState(null)
   const [loading, setLoading]             = useState(true)
-  const sectorCache = useRef({})
+  const [favorites, setFavorites]         = useState(loadFavs)
+  const [modal, setModal]                 = useState(null)
+  const sectorCache  = useRef({})
   const prevSectorId = useRef(null)
-  const [favorites, setFavorites] = useState(loadFavs)
-  const [modal, setModal]         = useState(null)
 
-  // Fetch base (GSPC + SPY) one range at a time, updating state as each arrives
+  // ── Data fetching ──────────────────────────────────────────────────────────
+
   const fetchAllBase = useCallback(async () => {
-    const allResults = await Promise.all(
-      RANGE_CONFIGS.map(rc => fetchYahooMany(['^GSPC','SPY'], rc.range, rc.interval))
+    const all = await Promise.all(
+      RANGE_CONFIGS.map(rc => fetchYahooMany(['^GSPC', 'SPY'], rc.range, rc.interval))
     )
     const byRange = {}
-    RANGE_CONFIGS.forEach((rc,i) => {
-      byRange[rc.label] = { sp: allResults[i][0], spy: allResults[i][1] }
+    RANGE_CONFIGS.forEach((rc, i) => {
+      byRange[rc.label] = { sp: all[i][0], spy: all[i][1] }
     })
     setBaseByRange(byRange)
     return byRange
@@ -61,25 +59,22 @@ export default function App() {
     const etfSyms = SECTORS.map(s => s.etf)
     const etfResults = await fetchYahooMany(etfSyms, '1y', '1d')
     const etfMap = {}
-    SECTORS.forEach((s,i) => { etfMap[s.id] = etfResults[i] })
+    SECTORS.forEach((s, i) => { etfMap[s.id] = etfResults[i] })
     setHeatmapEtfs(etfMap)
 
     const allSyms = SECTORS.flatMap(s => s.top7)
     const allResults = await fetchYahooMany(allSyms, '1y', '1d')
-    const allTop7Map = {}
+    const top7Map = {}
     let idx = 0
     SECTORS.forEach(s => {
-      allTop7Map[s.id] = allResults.slice(idx, idx + s.top7.length)
+      top7Map[s.id] = allResults.slice(idx, idx + s.top7.length)
       idx += s.top7.length
     })
-    setAllTop7Data(allTop7Map)
+    setAllTop7Data(top7Map)
   }, [])
 
-  // Fetch each range independently, updating state as each one arrives
-  const fetchAllSector = useCallback(async (sector, base, force=false) => {
-    // Clear existing sector data immediately so components show loading state
+  const fetchAllSector = useCallback(async (sector, base, force = false) => {
     setSectorByRange({})
-
     await Promise.all(RANGE_CONFIGS.map(async rc => {
       const key = `${sector.id}|${rc.label}`
       let data
@@ -96,12 +91,12 @@ export default function App() {
         }
         sectorCache.current[key] = data
       }
-      // Update this specific range immediately as it arrives
       setSectorByRange(prev => ({ ...prev, [rc.label]: data }))
     }))
   }, [])
 
-  // Init
+  // ── Init & refresh ─────────────────────────────────────────────────────────
+
   useEffect(() => {
     const init = async () => {
       setLoading(true)
@@ -112,28 +107,37 @@ export default function App() {
       setLoading(false)
     }
     init()
+
     const id = setInterval(async () => {
       sectorCache.current = {}
       const base = await fetchAllBase()
-      if (activeSector.id !== 'favorites') fetchAllSector(activeSector, base, true)
+      const cur = prevSectorId.current
+      if (cur && cur !== 'favorites' && cur !== 'screener') {
+        const sector = SECTORS.find(s => s.id === cur) ?? SECTORS[0]
+        fetchAllSector(sector, base, true)
+      }
       fetchHeatmapData()
       setLastUpdated(new Date())
     }, REFRESH_MS)
+
     return () => clearInterval(id)
-  }, [])
+  }, []) // eslint-disable-line
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleSectorChange = useCallback((sector) => {
     setActiveSector(sector)
-    if (sector.id !== 'favorites' && sector.id !== 'screener' && sector.id !== prevSectorId.current) {
-      prevSectorId.current = sector.id
-      fetchAllBase().then(base => fetchAllSector(sector, base))
-    }
+    if (sector.id === 'favorites' || sector.id === 'screener') return
+    if (sector.id === prevSectorId.current) return
+    prevSectorId.current = sector.id
+    fetchAllBase().then(base => fetchAllSector(sector, base))
   }, [fetchAllBase, fetchAllSector])
 
   const handleToggleFav = useCallback((sym) => {
     setFavorites(prev => {
-      const next = prev.includes(sym) ? prev.filter(s=>s!==sym) : [...prev,sym]
-      saveFavs(next); return next
+      const next = prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]
+      saveFavs(next)
+      return next
     })
   }, [])
 
@@ -141,27 +145,19 @@ export default function App() {
     setLoading(true)
     sectorCache.current = {}
     const base = await fetchAllBase()
+    const cur = activeSector
     await Promise.all([
-      activeSector.id !== 'favorites' && activeSector.id !== 'screener' ? fetchAllSector(activeSector, base, true) : Promise.resolve(),
+      (cur.id !== 'favorites' && cur.id !== 'screener') ? fetchAllSector(cur, base, true) : Promise.resolve(),
       fetchHeatmapData(),
     ])
     setLastUpdated(new Date())
     setLoading(false)
   }
 
-  const isFavTab     = activeSector.id === 'favorites'
-  const fade         = { opacity: Object.keys(sectorByRange).length === 0 ? 0.4 : 1, transition: 'opacity 0.3s' }
-  const spResult1Y   = baseByRange['1Y']?.sp  ?? null
-  const spyResult1Y  = baseByRange['1Y']?.spy ?? null
+  // ── Derived values ─────────────────────────────────────────────────────────
 
-  // Memoize per-card range maps so they don't recreate every render
-  const cardRangeMaps = useMemo(() => {
-    return activeSector.top7.map((_, i) => {
-      const out = {}
-      RANGE_CONFIGS.forEach(rc => { out[rc.label] = sectorByRange[rc.label]?.top7?.[i] ?? null })
-      return out
-    })
-  }, [sectorByRange, activeSector.id])
+  const spResult1Y  = baseByRange['1Y']?.sp  ?? null
+  const spyResult1Y = baseByRange['1Y']?.spy ?? null
 
   const spRangeMap = useMemo(() => {
     const out = {}
@@ -169,97 +165,156 @@ export default function App() {
     return out
   }, [baseByRange])
 
+  const cardRangeMaps = useMemo(() => {
+    return activeSector.top7
+      ? activeSector.top7.map((_, i) => {
+          const out = {}
+          RANGE_CONFIGS.forEach(rc => { out[rc.label] = sectorByRange[rc.label]?.top7?.[i] ?? null })
+          return out
+        })
+      : []
+  }, [sectorByRange, activeSector.id])
+
+  const hasRangeData = Object.keys(sectorByRange).length > 0
+  const fade = { opacity: hasRangeData ? 1 : 0.4, transition: 'opacity 0.3s' }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const isFavTab      = activeSector.id === 'favorites'
+  const isScreenerTab = activeSector.id === 'screener'
+  const isSectorTab   = !isFavTab && !isScreenerTab
+
   return (
     <div>
       {/* Header */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16, flexWrap:'wrap', gap:10 }}>
         <div>
-          <h1 style={{fontSize:20,fontWeight:600,color:'var(--text-primary)',letterSpacing:'-0.02em'}}>S&P 500 Sector Dashboard</h1>
-          <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>Real-time · Top 7 holdings · Sector vs market</div>
+          <h1 style={{ fontSize:20, fontWeight:600, color:'var(--text-primary)', letterSpacing:'-0.02em' }}>
+            S&P 500 Sector Dashboard
+          </h1>
+          <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>
+            Real-time · Top 7 holdings · Sector vs market
+          </div>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-          <TickerSearch spyResult={spyResult1Y} onAddFavorite={handleToggleFav} favorites={favorites}/>
-          {lastUpdated && <span style={{fontSize:11,color:'var(--text-muted)'}}>Updated {lastUpdated.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</span>}
-          <button onClick={handleRefresh} disabled={loading} style={{fontSize:11,padding:'5px 12px',background:'var(--bg-secondary)',border:'0.5px solid var(--border-strong)',borderRadius:'var(--radius-sm)',color:'var(--text-secondary)',cursor:loading?'default':'pointer'}}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+          <TickerSearch spyResult={spyResult1Y} onAddFavorite={handleToggleFav} favorites={favorites} />
+          {lastUpdated && (
+            <span style={{ fontSize:11, color:'var(--text-muted)' }}>
+              Updated {lastUpdated.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' })}
+            </span>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            style={{ fontSize:11, padding:'5px 12px', background:'var(--bg-secondary)', border:'0.5px solid var(--border-strong)', borderRadius:'var(--radius-sm)', color:'var(--text-secondary)', cursor: loading ? 'default' : 'pointer' }}
+          >
             {loading ? 'Refreshing…' : '↻ Refresh'}
           </button>
         </div>
       </div>
 
-      <SectorTabs activeSector={activeSector} onChange={handleSectorChange} favCount={favorites.length}/>
+      {/* Tabs */}
+      <SectorTabs activeSector={activeSector} onChange={handleSectorChange} favCount={favorites.length} />
 
-      {isScreenerTab ? (
-        <StockScreener onTickerClick={sym => setModal({type:'stock', sym, result:null})}/>
-      ) : isFavTab ? (
+      {/* ── Screener view ── */}
+      {isScreenerTab && (
+        <StockScreener
+          onTickerClick={sym => setModal({ type:'stock', sym, result:null })}
+        />
+      )}
+
+      {/* ── Favorites view ── */}
+      {isFavTab && (
         <FavoritesTab
           favorites={favorites}
           spRangeMap={spRangeMap}
           onToggleFav={handleToggleFav}
-          onClickStock={(sym,result) => setModal({type:'stock',sym,result})}
+          onClickStock={(sym, result) => setModal({ type:'stock', sym, result })}
         />
-      ) : (
+      )}
+
+      {/* ── Sector view ── */}
+      {isSectorTab && (
         <>
           {/* Row 1: Ticker cards */}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:8,marginBottom:12,...fade}} className="ticker-row">
-            {activeSector.top7.map((sym, i) => (
+          <div
+            style={{ display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))', gap:8, marginBottom:12, ...fade }}
+            className="ticker-row"
+          >
+            {(activeSector.top7 ?? []).map((sym, i) => (
               <TickerCard
                 key={`${sym}-${activeSector.id}`}
-                allRangeResults={cardRangeMaps[i]}
+                allRangeResults={cardRangeMaps[i] ?? {}}
                 sym={sym}
                 isFav={favorites.includes(sym)}
                 onToggleFav={handleToggleFav}
-                onClick={() => setModal({type:'stock', sym, result: sectorByRange['1Y']?.top7?.[i] ?? null})}
+                onClick={() => setModal({ type:'stock', sym, result: sectorByRange['1Y']?.top7?.[i] ?? null })}
               />
             ))}
-            <TickerCard key="sp500" allRangeResults={spRangeMap} sym="S&P 500" isSP500/>
+            <TickerCard key="sp500" allRangeResults={spRangeMap} sym="S&P 500" isSP500 />
           </div>
 
-          {/* Row 2 */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12,...fade}} className="mid-row">
-            <SectorMomentumPanel top7Results={sectorByRange['1Y']?.top7 ?? []} activeSector={activeSector}/>
+          {/* Row 2: Momentum | Analysis | Sector breakdown */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:12, ...fade }} className="mid-row">
+            <SectorMomentumPanel
+              top7Results={sectorByRange['1Y']?.top7 ?? []}
+              activeSector={activeSector}
+            />
             <SectorAnalysisPanel
               activeSector={activeSector}
               top7Results={sectorByRange['1Y']?.top7 ?? []}
               sectorResult={sectorByRange['1Y']?.etf ?? null}
               spyResult={spyResult1Y}
             />
-            <SectorPanel activeSector={activeSector}/>
+            <SectorPanel activeSector={activeSector} />
           </div>
 
-          {/* Row 3 */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr',gap:12,marginBottom:12,...fade}}>
+          {/* Row 3: ETF vs Market */}
+          <div style={{ marginBottom:12, ...fade }}>
             <SectorVsMarketPanel
               allRangeData={sectorByRange}
               activeSector={activeSector}
-              onExpand={() => setModal({type:'etf', sectorResult:sectorByRange['1Y']?.etf??null, relatedResults:sectorByRange['1Y']?.related??[], spyResult:spyResult1Y, activeSector})}
+              onExpand={() => setModal({
+                type:'etf',
+                sectorResult:  sectorByRange['1Y']?.etf ?? null,
+                relatedResults:sectorByRange['1Y']?.related ?? [],
+                spyResult:     spyResult1Y,
+                activeSector,
+              })}
             />
           </div>
 
-          {/* Row 4 */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12,...fade}} className="mid-row">
-            <SectorHeatmap sectorEtfResults={heatmapEtfs} spyResult={spyResult1Y} activeSector={activeSector} onSectorClick={handleSectorChange}/>
-            <NewsFeed syms={activeSector.top7} activeSector={activeSector}/>
+          {/* Row 4: Sector heatmap | News */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12, ...fade }} className="mid-row">
+            <SectorHeatmap
+              sectorEtfResults={heatmapEtfs}
+              spyResult={spyResult1Y}
+              activeSector={activeSector}
+              onSectorClick={handleSectorChange}
+            />
+            <NewsFeed syms={activeSector.top7 ?? []} activeSector={activeSector} />
           </div>
 
           {/* Row 5: All stocks heatmap */}
-          <div style={{...fade}}>
+          <div style={{ ...fade }}>
             <AllStocksHeatmap
               allSectorData={allTop7Data}
               spyResult={spyResult1Y}
-              onTickerClick={(sym,result) => setModal({type:'stock',sym,result})}
+              onTickerClick={(sym, result) => setModal({ type:'stock', sym, result })}
             />
           </div>
         </>
       )}
 
-      {modal && <ChartModal config={modal} onClose={() => setModal(null)}/>}
+      {/* Modal */}
+      {modal && <ChartModal config={modal} onClose={() => setModal(null)} />}
 
       <style>{`
-        @media (max-width:900px){.ticker-row{grid-template-columns:repeat(4,minmax(0,1fr))!important}}
-        @media (max-width:680px){
-          .ticker-row{grid-template-columns:repeat(2,minmax(0,1fr))!important}
-          .mid-row{grid-template-columns:1fr!important}
-          .bot-row{grid-template-columns:1fr!important}
+        @media (max-width:900px) { .ticker-row { grid-template-columns: repeat(4,minmax(0,1fr)) !important; } }
+        @media (max-width:680px) {
+          .ticker-row { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+          .mid-row    { grid-template-columns: 1fr !important; }
+          .bot-row    { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>
