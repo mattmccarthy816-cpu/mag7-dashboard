@@ -31,6 +31,22 @@ export default function SectorTabs({ activeSector, onChange, favCount }) {
         )}
       </button>
 
+      {/* Screener tab */}
+      <button
+        onClick={() => onChange({ id: 'screener', short: 'Screener', color: '#4ab8b8' })}
+        style={{
+          flexShrink: 0, fontSize: 12,
+          fontWeight: activeSector?.id === 'screener' ? 600 : 400,
+          padding: '6px 14px', borderRadius: 20,
+          border: activeSector?.id === 'screener' ? '1.5px solid #4ab8b8' : '0.5px solid var(--border)',
+          background: activeSector?.id === 'screener' ? '#4ab8b822' : 'var(--bg-card)',
+          color: activeSector?.id === 'screener' ? '#4ab8b8' : 'var(--text-secondary)',
+          cursor: 'pointer', whiteSpace: 'nowrap',
+        }}
+      >
+        ⊞ Screener
+      </button>
+
       {/* Divider */}
       <div style={{ width: 1, background: 'var(--border)', margin: '4px 4px', flexShrink: 0 }} />
 

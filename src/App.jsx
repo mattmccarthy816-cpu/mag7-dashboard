@@ -13,6 +13,7 @@ import TickerSearch from './components/TickerSearch'
 import SectorHeatmap from './components/SectorHeatmap'
 import NewsFeed from './components/NewsFeed'
 import AllStocksHeatmap from './components/AllStocksHeatmap'
+import StockScreener from './components/StockScreener'
 
 const REFRESH_MS = 60_000
 const FAV_KEY    = 'dashboard_favorites'
@@ -123,7 +124,7 @@ export default function App() {
 
   const handleSectorChange = useCallback((sector) => {
     setActiveSector(sector)
-    if (sector.id !== 'favorites' && sector.id !== prevSectorId.current) {
+    if (sector.id !== 'favorites' && sector.id !== 'screener' && sector.id !== prevSectorId.current) {
       prevSectorId.current = sector.id
       fetchAllBase().then(base => fetchAllSector(sector, base))
     }
@@ -141,7 +142,7 @@ export default function App() {
     sectorCache.current = {}
     const base = await fetchAllBase()
     await Promise.all([
-      activeSector.id !== 'favorites' ? fetchAllSector(activeSector, base, true) : Promise.resolve(),
+      activeSector.id !== 'favorites' && activeSector.id !== 'screener' ? fetchAllSector(activeSector, base, true) : Promise.resolve(),
       fetchHeatmapData(),
     ])
     setLastUpdated(new Date())
@@ -187,7 +188,9 @@ export default function App() {
 
       <SectorTabs activeSector={activeSector} onChange={handleSectorChange} favCount={favorites.length}/>
 
-      {isFavTab ? (
+      {isScreenerTab ? (
+        <StockScreener onTickerClick={sym => setModal({type:'stock', sym, result:null})}/>
+      ) : isFavTab ? (
         <FavoritesTab
           favorites={favorites}
           spRangeMap={spRangeMap}
