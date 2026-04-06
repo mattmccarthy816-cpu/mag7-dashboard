@@ -1,6 +1,28 @@
-// Screener: reliable two-step approach
-// Step 1: v8 chart for price/mcap/performance (always works)
-// Step 2: quoteSummary for PE/sector/analyst (best effort, per symbol)
+// Screener endpoint - fetches price data + fundamental enrichment
+// Uses crumb-authenticated v7/quote for PE, sector, analyst data
+
+async function getCrumb(headers) {
+  try {
+    // First get a cookie by visiting Yahoo Finance
+    const cookieRes = await fetch('https://finance.yahoo.com/', {
+      headers: { 'User-Agent': headers['User-Agent'] },
+      signal: AbortSignal.timeout(5000),
+    })
+    const cookies = cookieRes.headers.get('set-cookie') ?? ''
+
+    // Then get crumb
+    const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+      headers: { ...headers, Cookie: cookies },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!crumbRes.ok) return null
+    const crumb = await crumbRes.text()
+    return { crumb: crumb.trim(), cookies }
+  } catch {
+    return null
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET')
@@ -9,85 +31,82 @@ export default async function handler(req, res) {
   if (!symbols) return res.status(400).json({ error: 'symbols required' })
 
   const syms = symbols.split(',').map(s => s.trim()).filter(Boolean)
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'User-Agent': UA,
     'Accept': 'application/json',
     'Referer': 'https://finance.yahoo.com/',
     'Origin': 'https://finance.yahoo.com',
   }
 
-  async function tryFetch(url) {
-    for (const host of ['query2', 'query1']) {
-      try {
-        const u = url.replace('HOSTPLACEHOLDER', host)
-        const r = await fetch(u, { headers, signal: AbortSignal.timeout(8000) })
-        if (r.ok) return r.json()
-      } catch {}
-    }
-    return null
-  }
-
-  // Step 1: chart API — price, mcap, 1D change, 52w range
+  // Step 1: Chart API for price + history (always works, no auth needed)
   const stocks = {}
   await Promise.all(syms.map(async sym => {
-    const data = await tryFetch(
-      `https://HOSTPLACEHOLDER.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1y`
-    )
-    const result = data?.chart?.result?.[0]
-    if (!result) return
-    const meta = result.meta
-    const closes = (result.indicators?.quote?.[0]?.close ?? []).filter(v => v != null)
-    const n = closes.length
-    const price = meta.regularMarketPrice
-    const prev  = meta.chartPreviousClose ?? meta.previousClose
+    try {
+      for (const host of ['query2', 'query1']) {
+        const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1y`
+        const r = await fetch(url, { headers, signal: AbortSignal.timeout(8000) })
+        if (!r.ok) continue
+        const d = await r.json()
+        const result = d?.chart?.result?.[0]
+        if (!result) continue
+        const meta = result.meta
+        const closes = (result.indicators?.quote?.[0]?.close ?? []).filter(v => v != null)
+        const n = closes.length
+        const price = meta.regularMarketPrice
+        const prev  = meta.chartPreviousClose ?? meta.previousClose
 
-    stocks[sym] = {
-      sym,
-      name:      meta.longName ?? meta.shortName ?? sym,
-      price:     price ?? null,
-      chg1D:     price && prev ? (price - prev) / prev * 100 : null,
-      chg1M:     n > 21 ? (price - closes[n - 22]) / closes[n - 22] * 100 : null,
-      chg1Y:     n > 1  ? (price - closes[0])      / closes[0]      * 100 : null,
-      marketCap: meta.marketCap ?? null,
-      week52High:meta.fiftyTwoWeekHigh ?? null,
-      week52Low: meta.fiftyTwoWeekLow  ?? null,
-      trailingPE:   null,
-      forwardPE:    null,
-      sector:       null,
-      industry:     null,
-      analystRating:null,
-      analystCount: null,
-      targetPrice:  null,
-      eps:          null,
-      epsForward:   null,
+        stocks[sym] = {
+          sym,
+          name:       meta.longName ?? meta.shortName ?? sym,
+          price:      price ?? null,
+          chg1D:      price && prev ? (price - prev) / prev * 100 : null,
+          chg1M:      n > 21 ? (price - closes[n - 22]) / closes[n - 22] * 100 : null,
+          chg1Y:      n > 1  ? (price - closes[0]) / closes[0] * 100 : null,
+          marketCap:  meta.marketCap ?? null,
+          week52High: meta.fiftyTwoWeekHigh ?? null,
+          week52Low:  meta.fiftyTwoWeekLow  ?? null,
+          trailingPE: null, forwardPE: null, sector: null,
+          industry: null, analystRating: null, analystCount: null,
+          targetPrice: null, eps: null, epsForward: null,
+        }
+        break
+      }
+    } catch {}
+  }))
+
+  // Step 2: v7/quote with crumb for PE, sector, analyst data
+  const auth = await getCrumb(headers)
+  if (auth) {
+    const { crumb, cookies } = auth
+    const enrichHeaders = { ...headers, Cookie: cookies }
+    const fields = 'trailingPE,forwardPE,sector,industry,recommendationKey,numberOfAnalystOpinions,targetMeanPrice,epsTrailingTwelveMonths,epsForward,shortName,marketCap'
+
+    try {
+      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${syms.join(',')}&fields=${fields}&crumb=${encodeURIComponent(crumb)}`
+      const r = await fetch(url, { headers: enrichHeaders, signal: AbortSignal.timeout(10000) })
+      if (r.ok) {
+        const data = await r.json()
+        const quotes = data?.quoteResponse?.result ?? []
+        quotes.forEach(q => {
+          if (!stocks[q.symbol]) return
+          const s = stocks[q.symbol]
+          if (typeof q.trailingPE === 'number')               s.trailingPE   = q.trailingPE
+          if (typeof q.forwardPE  === 'number')               s.forwardPE    = q.forwardPE
+          if (q.sector)                                       s.sector       = q.sector
+          if (q.industry)                                     s.industry     = q.industry
+          if (q.recommendationKey)                            s.analystRating = q.recommendationKey
+          if (typeof q.numberOfAnalystOpinions === 'number')  s.analystCount  = q.numberOfAnalystOpinions
+          if (typeof q.targetMeanPrice === 'number')          s.targetPrice   = q.targetMeanPrice
+          if (typeof q.epsTrailingTwelveMonths === 'number')  s.eps           = q.epsTrailingTwelveMonths
+          if (typeof q.epsForward === 'number')               s.epsForward    = q.epsForward
+          if (typeof q.marketCap === 'number' && !s.marketCap) s.marketCap   = q.marketCap
+        })
+      }
+    } catch (e) {
+      console.log('v7 enrichment failed:', e.message)
     }
-  }))
-
-  // Step 2: quoteSummary for PE, sector, analyst — one symbol at a time is reliable
-  await Promise.all(syms.map(async sym => {
-    if (!stocks[sym]) return
-    const data = await tryFetch(
-      `https://HOSTPLACEHOLDER.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=price,defaultKeyStatistics,financialData`
-    )
-    const r = data?.quoteSummary?.result?.[0]
-    if (!r) return
-
-    const price    = r.price ?? {}
-    const keyStats = r.defaultKeyStatistics ?? {}
-    const finData  = r.financialData ?? {}
-
-    // price module has sector, PE, analyst rating
-    if (price.sector)                          stocks[sym].sector        = price.sector
-    if (price.industry)                        stocks[sym].industry      = price.industry
-    if (typeof price.trailingPE?.raw === 'number') stocks[sym].trailingPE = price.trailingPE.raw
-    if (typeof price.forwardPE?.raw  === 'number') stocks[sym].forwardPE  = price.forwardPE.raw
-    if (price.marketCap?.raw)                  stocks[sym].marketCap     = price.marketCap.raw
-    if (price.recommendationKey)               stocks[sym].analystRating = price.recommendationKey
-    if (typeof keyStats.trailingEps?.raw === 'number') stocks[sym].eps   = keyStats.trailingEps.raw
-    if (typeof keyStats.forwardEps?.raw  === 'number') stocks[sym].epsForward = keyStats.forwardEps.raw
-    if (typeof finData.targetMeanPrice?.raw === 'number') stocks[sym].targetPrice = finData.targetMeanPrice.raw
-    if (typeof finData.numberOfAnalystOpinions?.raw === 'number') stocks[sym].analystCount = finData.numberOfAnalystOpinions.raw
-  }))
+  }
 
   return res.status(200).json(Object.values(stocks))
 }

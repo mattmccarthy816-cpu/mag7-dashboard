@@ -1,3 +1,22 @@
+// Fetch quarterly EPS + key financials for a single symbol
+// Uses crumb-authenticated quoteSummary
+
+async function getCrumb(headers) {
+  try {
+    const cookieRes = await fetch('https://finance.yahoo.com/', {
+      headers: { 'User-Agent': headers['User-Agent'] },
+      signal: AbortSignal.timeout(5000),
+    })
+    const cookies = cookieRes.headers.get('set-cookie') ?? ''
+    const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+      headers: { ...headers, Cookie: cookies },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!crumbRes.ok) return null
+    return { crumb: (await crumbRes.text()).trim(), cookies }
+  } catch { return null }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
@@ -12,28 +31,31 @@ export default async function handler(req, res) {
     'Referer': 'https://finance.yahoo.com/',
   }
 
-  // Yahoo uses different symbol formats — try both
-  const symVariants = [symbol, symbol.replace('-', '.')]
-  const raw = v => (typeof v === 'object' && v !== null && 'raw' in v) ? v.raw : (typeof v === 'number' ? v : null)
+  const raw = v => typeof v === 'object' && v && 'raw' in v ? v.raw : typeof v === 'number' ? v : null
+
+  // Try with crumb first, then without
+  const auth = await getCrumb(headers)
+  const symVariants = [symbol, symbol.replace(/-/g, '.')]
+  const modules = 'earnings,earningsHistory,financialData,defaultKeyStatistics,assetProfile'
 
   for (const sym of symVariants) {
-    for (const host of ['query2', 'query1']) {
+    for (const useAuth of [true, false]) {
+      if (useAuth && !auth) continue
       try {
-        const modules = 'earnings,earningsHistory,financialData,defaultKeyStatistics,price'
-        const url = `https://${host}.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=${modules}`
-        const r = await fetch(url, { headers, signal: AbortSignal.timeout(10000) })
-
+        const crumbParam = useAuth ? `&crumb=${encodeURIComponent(auth.crumb)}` : ''
+        const reqHeaders = useAuth
+          ? { ...headers, Cookie: auth.cookies }
+          : headers
+        const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=${modules}${crumbParam}`
+        const r = await fetch(url, { headers: reqHeaders, signal: AbortSignal.timeout(10000) })
         if (!r.ok) {
-          const body = await r.text()
-          console.log(`${host}/${sym} returned ${r.status}:`, body.slice(0, 200))
+          console.log(`quoteSummary ${sym} (auth=${useAuth}): ${r.status}`)
           continue
         }
-
         const data = await r.json()
         const result = data?.quoteSummary?.result?.[0]
-
         if (!result) {
-          console.log(`${host}/${sym} no result. Error:`, JSON.stringify(data?.quoteSummary?.error))
+          console.log(`quoteSummary ${sym}: no result`, JSON.stringify(data?.quoteSummary?.error ?? ''))
           continue
         }
 
@@ -41,7 +63,7 @@ export default async function handler(req, res) {
         const earnings     = result.earnings ?? {}
         const finData      = result.financialData ?? {}
         const keyStats     = result.defaultKeyStatistics ?? {}
-        const priceData    = result.price ?? {}
+        const assetProfile = result.assetProfile ?? {}
 
         // Quarterly EPS
         let quarters = []
@@ -60,13 +82,13 @@ export default async function handler(req, res) {
             date:        String(q.date ?? ''),
             epsActual:   raw(q.actual),
             epsEstimate: raw(q.estimate),
-            epsSurprise: null,
-            surprisePct: null,
+            epsSurprise: null, surprisePct: null,
           }))
         }
 
         // Analyst trend
-        const trendArr = finData.recommendationTrend?.trend ?? []
+        const trendArr = assetProfile.recommendationTrend?.trend
+          ?? finData.recommendationTrend?.trend ?? []
         const trend = trendArr[0] ?? {}
 
         return res.status(200).json({
@@ -81,7 +103,7 @@ export default async function handler(req, res) {
             debtToEquity:     raw(finData.debtToEquity),
             currentRatio:     raw(finData.currentRatio),
             freeCashflow:     raw(finData.freeCashflow),
-            analystRating:    finData.recommendationKey ?? priceData.recommendationKey ?? null,
+            analystRating:    finData.recommendationKey ?? null,
             targetPrice:      raw(finData.targetMeanPrice),
             targetLow:        raw(finData.targetLowPrice),
             targetHigh:       raw(finData.targetHighPrice),
@@ -101,17 +123,14 @@ export default async function handler(req, res) {
           }
         })
       } catch (e) {
-        console.log(`financials ${host}/${sym} threw:`, e.message)
+        console.log(`financials error (${sym}, auth=${useAuth}):`, e.message)
       }
     }
   }
 
-  // Return empty structure instead of 404 — frontend handles missing data gracefully
+  // Graceful fallback — return empty rather than 404
   return res.status(200).json({
-    symbol,
-    quarters: [],
-    financials: {},
-    stats: {},
-    note: 'No data available from Yahoo Finance for this symbol'
+    symbol, quarters: [], financials: {}, stats: {},
+    note: 'Financial data unavailable'
   })
 }

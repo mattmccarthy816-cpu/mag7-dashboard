@@ -97,7 +97,11 @@ export default function TickerCard({ allRangeResults, sym, isSP500=false, isFav=
   const sparkColor = isUp ? '#1fb87a' : '#e05050'
 
   // Range-specific return (open→close of that period)
-  const rangeChg = closes.length > 1 ? pctChange(closes[closes.length-1], closes[0]) : null
+  // For 1D: intraday closes start at market open, not prev close — use meta pct instead
+  // For 1W+: first close IS start of period so open-to-now is correct
+  const rangeChg = activeRange === '1D'
+    ? pct
+    : closes.length > 1 ? pctChange(closes[closes.length-1], closes[0]) : null
 
   return (
     <div
