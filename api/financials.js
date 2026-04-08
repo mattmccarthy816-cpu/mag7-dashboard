@@ -1,22 +1,3 @@
-// Fetch quarterly EPS + key financials for a single symbol
-// Uses crumb-authenticated quoteSummary
-
-async function getCrumb(headers) {
-  try {
-    const cookieRes = await fetch('https://finance.yahoo.com/', {
-      headers: { 'User-Agent': headers['User-Agent'] },
-      signal: AbortSignal.timeout(5000),
-    })
-    const cookies = cookieRes.headers.get('set-cookie') ?? ''
-    const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-      headers: { ...headers, Cookie: cookies },
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!crumbRes.ok) return null
-    return { crumb: (await crumbRes.text()).trim(), cookies }
-  } catch { return null }
-}
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
@@ -32,40 +13,29 @@ export default async function handler(req, res) {
   }
 
   const raw = v => typeof v === 'object' && v && 'raw' in v ? v.raw : typeof v === 'number' ? v : null
-
-  // Try with crumb first, then without
-  const auth = await getCrumb(headers)
-  const symVariants = [symbol, symbol.replace(/-/g, '.')]
+  // Yahoo uses BRK.B not BRK-B in some endpoints
+  const symVariants = [...new Set([symbol, symbol.replace(/-/g, '.')])]
   const modules = 'earnings,earningsHistory,financialData,defaultKeyStatistics,assetProfile'
 
   for (const sym of symVariants) {
-    for (const useAuth of [true, false]) {
-      if (useAuth && !auth) continue
+    for (const host of ['query2', 'query1']) {
       try {
-        const crumbParam = useAuth ? `&crumb=${encodeURIComponent(auth.crumb)}` : ''
-        const reqHeaders = useAuth
-          ? { ...headers, Cookie: auth.cookies }
-          : headers
-        const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=${modules}${crumbParam}`
-        const r = await fetch(url, { headers: reqHeaders, signal: AbortSignal.timeout(10000) })
-        if (!r.ok) {
-          console.log(`quoteSummary ${sym} (auth=${useAuth}): ${r.status}`)
-          continue
-        }
+        // Use v6 — no crumb required
+        const r = await fetch(
+          `https://${host}.finance.yahoo.com/v6/finance/quoteSummary/${sym}?modules=${encodeURIComponent(modules)}`,
+          { headers, signal: AbortSignal.timeout(10000) }
+        )
+        if (!r.ok) { console.log(`${host}/${sym}: ${r.status}`); continue }
         const data = await r.json()
         const result = data?.quoteSummary?.result?.[0]
-        if (!result) {
-          console.log(`quoteSummary ${sym}: no result`, JSON.stringify(data?.quoteSummary?.error ?? ''))
-          continue
-        }
+        if (!result) { console.log(`${host}/${sym}: no result`); continue }
 
         const earningsHist = result.earningsHistory ?? {}
         const earnings     = result.earnings ?? {}
-        const finData      = result.financialData ?? {}
-        const keyStats     = result.defaultKeyStatistics ?? {}
-        const assetProfile = result.assetProfile ?? {}
+        const fin          = result.financialData ?? {}
+        const stats        = result.defaultKeyStatistics ?? {}
 
-        // Quarterly EPS
+        // Quarterly EPS — earningsHistory is more detailed
         let quarters = []
         const histQ = earningsHist.history ?? []
         if (histQ.length) {
@@ -77,6 +47,7 @@ export default async function handler(req, res) {
             surprisePct: raw(q.surprisePercent),
           }))
         } else {
+          // Fallback to earnings chart quarterly data
           const chartQ = earnings.earningsChart?.quarterly ?? []
           quarters = chartQ.slice(-4).map(q => ({
             date:        String(q.date ?? ''),
@@ -86,28 +57,27 @@ export default async function handler(req, res) {
           }))
         }
 
-        // Analyst trend
-        const trendArr = assetProfile.recommendationTrend?.trend
-          ?? finData.recommendationTrend?.trend ?? []
+        // Analyst trend breakdown
+        const trendArr = fin.recommendationTrend?.trend ?? []
         const trend = trendArr[0] ?? {}
 
         return res.status(200).json({
           symbol: sym,
           quarters,
           financials: {
-            revenueGrowth:    raw(finData.revenueGrowth),
-            grossMargins:     raw(finData.grossMargins),
-            operatingMargins: raw(finData.operatingMargins),
-            profitMargins:    raw(finData.profitMargins),
-            returnOnEquity:   raw(finData.returnOnEquity),
-            debtToEquity:     raw(finData.debtToEquity),
-            currentRatio:     raw(finData.currentRatio),
-            freeCashflow:     raw(finData.freeCashflow),
-            analystRating:    finData.recommendationKey ?? null,
-            targetPrice:      raw(finData.targetMeanPrice),
-            targetLow:        raw(finData.targetLowPrice),
-            targetHigh:       raw(finData.targetHighPrice),
-            analystCount:     raw(finData.numberOfAnalystOpinions),
+            revenueGrowth:    raw(fin.revenueGrowth),
+            grossMargins:     raw(fin.grossMargins),
+            operatingMargins: raw(fin.operatingMargins),
+            profitMargins:    raw(fin.profitMargins),
+            returnOnEquity:   raw(fin.returnOnEquity),
+            debtToEquity:     raw(fin.debtToEquity),
+            currentRatio:     raw(fin.currentRatio),
+            freeCashflow:     raw(fin.freeCashflow),
+            analystRating:    fin.recommendationKey ?? null,
+            targetPrice:      raw(fin.targetMeanPrice),
+            targetLow:        raw(fin.targetLowPrice),
+            targetHigh:       raw(fin.targetHighPrice),
+            analystCount:     raw(fin.numberOfAnalystOpinions),
             strongBuy:        trend.strongBuy  ?? null,
             buy:              trend.buy        ?? null,
             hold:             trend.hold       ?? null,
@@ -115,20 +85,19 @@ export default async function handler(req, res) {
             strongSell:       trend.strongSell ?? null,
           },
           stats: {
-            beta:        raw(keyStats.beta),
-            shortRatio:  raw(keyStats.shortRatio),
-            bookValue:   raw(keyStats.bookValue),
-            priceToBook: raw(keyStats.priceToBook),
-            pegRatio:    raw(keyStats.pegRatio),
+            beta:        raw(stats.beta),
+            shortRatio:  raw(stats.shortRatio),
+            bookValue:   raw(stats.bookValue),
+            priceToBook: raw(stats.priceToBook),
+            pegRatio:    raw(stats.pegRatio),
           }
         })
-      } catch (e) {
-        console.log(`financials error (${sym}, auth=${useAuth}):`, e.message)
+      } catch(e) {
+        console.log(`financials ${host}/${sym}:`, e.message)
       }
     }
   }
 
-  // Graceful fallback — return empty rather than 404
   return res.status(200).json({
     symbol, quarters: [], financials: {}, stats: {},
     note: 'Financial data unavailable'
